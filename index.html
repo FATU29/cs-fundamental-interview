@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CS Fundamentals</title>
+  <meta name="description" content="Kho kiến thức nền tảng Computer Science, phân tích tới tầng OS và phần cứng.">
+  <link rel="stylesheet" href="assets/style.css">
+  <script src="assets/ui.js"></script>
+</head>
+<body data-page="home" data-base="">
+  <a class="skip-link" href="#main">Bỏ qua điều hướng</a>
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="index.html">CS Fundamentals</a>
+      <nav class="crumbs" aria-label="Breadcrumb">Trang chủ</nav>
+      <label class="sr-only" for="theme-select">Giao diện</label>
+      <select id="theme-select" class="theme-select"></select>
+    </div>
+  </header>
+
+  <main id="main" class="wrap">
+    <section class="hero">
+      <h1>Nắm bản chất, không học thuộc</h1>
+      <p>Mỗi bài đi từ bài toán gốc, cơ chế ở tầng OS/phần cứng, tới đánh đổi và lỗi production.</p>
+      <label for="search" class="sr-only">Tìm chủ đề hoặc bài viết</label>
+      <input id="search" class="search" type="search" placeholder="Tìm chủ đề hoặc bài viết..." autocomplete="off">
+    </section>
+
+    <section aria-labelledby="topics-h">
+      <h2 id="topics-h" class="section-title">Chủ đề</h2>
+      <div id="topics" class="grid"></div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">Danh sách nằm trong <code>registry.js</code>. Mỗi bài là một file Markdown, hiển thị qua <code>reader.html</code>.</div>
+  </footer>
+
+  <script src="registry.js"></script>
+  <script src="assets/app.js"></script>
+  <noscript>Cần bật JavaScript để hiển thị danh sách chủ đề.</noscript>
+</body>
+</html>

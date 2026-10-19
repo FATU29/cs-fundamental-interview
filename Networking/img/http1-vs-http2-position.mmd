@@ -1,0 +1,11 @@
+flowchart TB
+    A["Application semantics<br/>methods, status codes, headers (RFC 9110)"]
+    B1["HTTP/1.1<br/>text messages"]
+    B2["HTTP/2<br/>binary frames, streams, HPACK"]
+    T["TLS (ALPN picks h2 or http/1.1)"]
+    C["TCP"]
+    A --> B1
+    A --> B2
+    B1 --> T
+    B2 --> T
+    T --> C

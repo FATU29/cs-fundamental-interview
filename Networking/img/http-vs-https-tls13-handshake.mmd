@@ -1,0 +1,13 @@
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+
+    Note over C,S: RTT 1
+    C->>S: ClientHello<br/>TLS 1.3, cipher suites, key_share (X25519)
+    S-->>C: ServerHello + EncryptedExtensions<br/>Certificate + CertificateVerify + Finished
+    Note over S: Verify cert chain,<br/>derive session key
+    Note over C: Verify cert chain,<br/>verify Finished, derive session key
+    C->>S: Finished
+    Note over C,S: HTTP data bat dau o day
+    C->>S: HTTP GET /orders (ma hoa AEAD)
+    S-->>C: HTTP 200 OK (ma hoa AEAD)

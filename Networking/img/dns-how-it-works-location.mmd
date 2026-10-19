@@ -1,0 +1,19 @@
+---
+title: Vị trí DNS trong stack mạng
+---
+flowchart LR
+    Client["Client<br/>(browser, SDK)"]
+    Stub["Stub resolver<br/>(OS/app)"]
+    Recursive["Recursive resolver<br/>(1.1.1.1, 8.8.8.8)"]
+    Root["Root server<br/>(.)"]
+    TLD["TLD server<br/>(.com)"]
+    Auth["Authoritative<br/>(example.com)"]
+
+    Client --> Stub
+    Stub --> Recursive
+    Recursive --> Root
+    Root --> Recursive
+    Recursive --> TLD
+    TLD --> Recursive
+    Recursive --> Auth
+    Auth --> Recursive

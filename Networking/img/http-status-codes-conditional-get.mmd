@@ -1,0 +1,13 @@
+sequenceDiagram
+  participant B as Browser cache
+  participant S as Server
+  B->>S: GET /products/42
+  S-->>B: 200 OK + ETag v7 + Cache-Control max-age=60
+  Note over B: HOT PATH: trong 60 giây dùng thẳng từ cache, không có request mạng
+  B->>S: GET /products/42 + If-None-Match v7
+  alt dữ liệu chưa đổi
+    S-->>B: 304 Not Modified (không có body)
+  else đã đổi
+    S-->>B: 200 OK + ETag v8 + body mới
+  end
+  Note over B,S: 304 tiết kiệm băng thông nhưng vẫn tốn 1 RTT

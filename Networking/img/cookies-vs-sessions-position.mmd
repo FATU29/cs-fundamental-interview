@@ -1,0 +1,11 @@
+flowchart LR
+  B["Browser<br/>(cookie store)"]
+  H["HTTP request<br/>Set-Cookie / Cookie"]
+  A["App server<br/>verify session ID"]
+  S["Session store<br/>(Redis, memory, DB)"]
+  T["Token = opaque session ID<br/>(không phải state)"]
+  B -- request + Cookie header --> A
+  A -- Set-Cookie on response --> B
+  A <-- lookup / save --> S
+  A -.gán session ID.-> T
+  T -.chứa state phiên.-> S

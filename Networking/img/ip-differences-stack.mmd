@@ -1,0 +1,10 @@
+flowchart TD
+  APP["Ứng dụng<br/>getaddrinfo, connect"] --> DNS["DNS resolver<br/>A + AAAA record"]
+  APP --> SOCK["Socket API<br/>AF_INET / AF_INET6"]
+  SOCK --> L4["L4: TCP, UDP"]
+  L4 --> L3["L3: IPv4 hoặc IPv6"]
+  L3 --> RT["FIB riêng v4/v6<br/>quyết định next hop"]
+  L3 --> FW["Netfilter<br/>iptables + ip6tables"]
+  L3 --> NBR["Phân giải next hop → MAC<br/>IPv4: ARP | IPv6: NDP/ICMPv6"]
+  NBR --> L2["L2: Ethernet, Wi-Fi<br/>MTU 1500"]
+  FW --> L2

@@ -1,0 +1,7 @@
+flowchart TD
+  APP["Ứng dụng<br/>getaddrinfo, connect"] --> STUB["Stub resolver, L7<br/>DNS: tên sang IP, UDP hoặc TCP cổng 53"]
+  STUB -.-> REC["Recursive resolver<br/>root, TLD, authoritative"]
+  APP --> SOCK["Socket, TCP hoặc UDP, L4"]
+  SOCK --> IP["IP, L3<br/>so subnet, chọn next hop theo route table"]
+  IP --> NB["ARP cho IPv4, NDP cho IPv6<br/>IP của next hop sang MAC, neighbor cache"]
+  NB --> ETH["Ethernet frame, L2<br/>chỉ trong một broadcast domain"]

@@ -1,0 +1,15 @@
+flowchart LR
+    App["Application<br/>(HTTP, DNS, VoIP)"]
+    subgraph T["Transport Layer"]
+        TCP["TCP<br/>reliable · in-order<br/>flow · congestion control"]
+        UDP["UDP<br/>datagram · no state<br/>no retransmit"]
+    end
+    Net["Network Layer<br/>(IP)"]
+    App --> TCP
+    App --> UDP
+    TCP --> Net
+    UDP --> Net
+    TCP -->|"3-way handshake<br/>4-way close<br/>ACK · RTO · cwnd"| TCP
+    UDP -->|"0 handshake<br/>1 datagram = 1 event"| UDP
+    style TCP fill:#b3e0ff
+    style UDP fill:#ffe0b3

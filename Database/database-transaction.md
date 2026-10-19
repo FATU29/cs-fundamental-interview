@@ -1,0 +1,363 @@
+# What is a database transaction?
+
+> Bài này giải thích transaction là gì, ranh giới BEGIN/COMMIT/ROLLBACK, cách engine ghi log và khóa để đảm bảo ACID, và các cơ chế savepoint/auto-commit. Bài [acid-properties](acid-properties.md) đi sâu từng chữ cái; bài [database-isolation-levels](database-isolation-levels.md) chi tiết các mức cô lập.
+
+Chủ đề: Database · Ngày: 2026-10-16
+
+## 1. Là gì
+
+Database transaction là một đơn vị công việc gồm một hoặc nhiều câu SQL được engine xử lý như một khối duy nhất: hoặc tất cả câu được áp dụng vĩnh viễn (COMMIT), hoặc engine huỷ bỏ toàn bộ ảnh hưởng của chúng như thể chưa từng chạy (ROLLBACK). Trong RDBMS, ranh giới transaction được đánh dấu bằng `BEGIN` (hoặc `START TRANSACTION`) và kết thúc bằng `COMMIT` / `ROLLBACK`. Ngoài RDBMS, transaction còn xuất hiện trong một số NoSQL (MongoDB replica set, document store có multi-doc ACID) nhưng phổ biến nhất vẫn là SQL.
+
+Transaction cần thiết vì nhiều nghiệp vụ chạm nhiều dòng/bảng (chuyển tiền: trừ tài khoản A, cộng tài khoản B) và phải "tất cả hoặc không" để không để dữ liệu ở trạng thái nửa vời. Engine dùng write-ahead log (WAL) và lock manager để đảm bảo điều đó; chi tiết ở [write-ahead-log](write-ahead-log.md) và [acid-properties](acid-properties.md).
+
+```mermaid
+flowchart LR
+    App["Application<br/>(order service,<br/>payment worker)"]
+    Driver["DB driver / pool<br/>(begin, commit,<br/>rollback)"]
+    Txn["Transaction<br/>(BEGIN ... COMMIT<br/>/ ROLLBACK)"]
+    Engine["Storage engine<br/>(WAL, lock manager,<br/>MVCC)"]
+    Disk["Disk / SSD<br/>(data files, redo log)"]
+    App --> Driver --> Txn --> Engine --> Disk
+```
+
+*Sơ đồ vị trí: Application gửi câu SQL qua driver; driver mở transaction; engine áp dụng thay đổi vào buffer, ghi WAL ra disk; COMMIT mới flush data file.*
+
+### Trả lời 30 giây
+
+"Transaction là đơn vị công việc ACID bao gồm một hoặc nhiều câu SQL, được engine xử lý nguyên tử: hoặc tất cả COMMIT, hoặc ROLLBACK không để lại dấu vết. Trong PostgreSQL và InnoDB (MySQL), transaction mặc định bắt đầu bằng `BEGIN` và kết thúc bằng `COMMIT` / `ROLLBACK`, trừ khi bật auto-commit (PostgreSQL có thể bật `SET autocommit = on`). Engine dùng write-ahead log để khôi phục sau crash và lock + MVCC để cô lập giữa các transaction chạy song song. Một transaction chỉ nên giữ trong vài trăm ms tới vài giây; giữ quá lâu sẽ phình WAL, lock contention và block vacuum."
+
+## 2. Cơ chế cốt lõi
+
+### Bước 1. BEGIN: mở transaction, gắn session
+
+1. Application (hoặc driver) gửi `BEGIN` (PostgreSQL, MySQL/InnoDB) hoặc `START TRANSACTION` (chuẩn SQL). Engine cấp một transaction ID ngầm (PostgreSQL: `xid` 32-bit, có thể tràn sau ~4 tỷ transaction; InnoDB: `trx_id`).
+2. Auto-commit: PostgreSQL mặc định `autocommit = on`, mỗi câu là một transaction ngầm, trừ khi tắt bằng `SET autocommit = off` hoặc mở `BEGIN`. MySQL InnoDB mặc định cũng bật autocommit. SQL Server mặc định autocommit on; Oracle bắt đầu transaction khi câu DML đầu tiên chạy mà không cần `BEGIN`.
+
+### Bước 2. Thực thi câu SQL: áp dụng vào buffer, ghi WAL
+
+1. Câu `UPDATE/INSERT/DELETE` không ghi thẳng vào data file. Engine ghi bản ghi thay đổi vào redo log (WAL) và cập nhật buffer pool. Data file được flush async. Phụ thuộc phiên bản: PostgreSQL dùng WAL; InnoDB dùng redo log; SQL Server dùng transaction log; Oracle dùng redo log.
+2. Trong transaction, thay đổi có thể nhìn thấy qua MVCC (PostgreSQL/InnoDB) ngay với chính transaction đó và các transaction khác tuỳ isolation level. Đọc xem [database-isolation-levels](database-isolation-levels.md).
+
+### Bước 3. COMMIT hoặc ROLLBACK
+
+1. **COMMIT**: engine flush redo log xuống disk (PostgreSQL: ghi `COMMIT` record; InnoDB: ghi LSN của commit). Sau khi WAL bền, COMMIT trả OK; data file có thể chưa flush ngay, engine flush sau qua checkpoint.
+2. **ROLLBACK**: engine đọc undo log (PostgreSQL: `pg_xact`, InnoDB: rollback segment) để revert từng thay đổi về snapshot ban đầu. Chi phí ROLLBACK tỉ lệ với lượng thay đổi đã ghi, không phải thời gian transaction.
+
+### Bước 4. Auto-commit và chain
+
+```sql
+-- PostgreSQL / MySQL InnoDB
+BEGIN;
+UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+UPDATE accounts SET balance = balance + 100 WHERE id = 2;
+COMMIT;
+-- Nếu một trong hai UPDATE lỗi (FK, deadlock), cả hai rollback.
+```
+
+Engine cho phép auto-commit mỗi câu hoặc gộp nhiều câu bằng `BEGIN ... COMMIT`. Nếu giữa chừng có lỗi, transaction vẫn mở; ứng dụng phải gửi `ROLLBACK` rõ ràng hoặc đóng kết nối.
+
+### Bước 5. Savepoint: commit một phần
+
+Savepoint đánh dấu điểm trong transaction; có thể `ROLLBACK TO SAVEPOINT` để huỷ thay đổi sau điểm đó mà vẫn giữ transaction mở. Hữu ích cho khối lệnh dài nhiều bước có thể rollback chọn lọc.
+
+```sql
+BEGIN;
+INSERT INTO orders (user_id, total) VALUES (1, 100) RETURNING id; -- giả sử 42
+SAVEPOINT before_payment;
+INSERT INTO payments (order_id, amount) VALUES (42, 100);
+-- lỗi thanh toán
+ROLLBACK TO SAVEPOINT before_payment;
+INSERT INTO payments (order_id, amount) VALUES (42, 0); -- ghi nhận thất bại
+COMMIT;
+```
+
+PostgreSQL và Oracle hỗ trợ savepoint lồng nhau; MySQL InnoDB cũng hỗ trợ nhưng không lồng.
+
+### Bước 6. Cách cô lập transaction
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant DB as DB engine
+    participant WAL as WAL/Redo log
+    participant Disk as Disk
+    App->>DB: BEGIN
+    Note over DB: xid/trx_id<br/>gắn với session
+    App->>DB: UPDATE accounts SET balance=balance-100 WHERE id=1
+    DB->>WAL: ghi bản ghi redo + undo
+    WAL->>Disk: fsync (chưa flush data file)
+    App->>DB: UPDATE accounts SET balance=balance+100 WHERE id=2
+    DB->>WAL: ghi bản ghi redo + undo
+    App->>DB: COMMIT
+    DB->>WAL: ghi COMMIT record, fsync
+    Note over DB: trả OK sau khi WAL bền
+    DB->>Disk: flush data file (async, qua checkpoint)
+```
+
+*Vòng đời transaction: BEGIN → ghi từng thay đổi vào WAL + undo → COMMIT ghi record cuối và fsync → trả OK; data file flush sau qua checkpoint.*
+
+### Bước 7. Khi nào transaction kết thúc "không mong đợi"
+
+- Connection đóng giữa chừng (client crash, timeout): engine rollback transaction đang mở.
+- Deadlock giữa hai transaction: engine chọn một nạn nhân và rollback nó, trả lỗi `40P01` (PostgreSQL) hoặc `ER_LOCK_DEADLOCK` (MySQL). Ứng dụng phải bắt và retry.
+- Statement timeout: PostgreSQL `statement_timeout`, MySQL `MAX_EXECUTION_TIME` huỷ câu nhưng transaction vẫn mở; cần rollback rõ ràng.
+- Idle-in-transaction: session mở transaction rồi im lặng. PostgreSQL có `idle_in_transaction_session_timeout` để tránh giữ lock.
+
+### Quan sát
+
+```bash
+# PostgreSQL: xem transaction đang mở và thời gian giữ
+psql -c "SELECT pid, state, query_start, xact_start, query FROM pg_stat_activity WHERE state IS NOT NULL ORDER BY xact_start;"
+# idle in transaction > N giây → chặn vacuum, giữ lock
+
+# MySQL InnoDB: xem transaction đang chạy
+mysql -e "SELECT trx_id, trx_state, trx_started, trx_query FROM information_schema.innodb_trx;"
+# trx_started cách đây > N giây → quá lâu
+
+# PostgreSQL: kiểm tra WAL có flush kịp không
+psql -c "SELECT pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), '0/0'::pg_lsn)) AS lag;"
+```
+
+### Ví dụ chạy từng bước
+
+Kịch bản: chuyển 100 USD từ tài khoản A sang tài khoản B trong một hệ thống payment. Hai bảng `accounts(id, balance)` và `audit_log(id, account_id, amount, ts)`. Sáu bước theo thời gian.
+
+Bước 1. T0: connection mở `BEGIN`. Engine cấp `xid=12345` cho session, đánh dấu transaction trong `pg_stat_activity.state='active'`. Snapshot MVCC được tạo, chưa có thay đổi.
+
+Bước 2. T1: `UPDATE accounts SET balance = balance - 100 WHERE id = 1` (balance 1000 → 900). Engine ghi bản ghi redo vào WAL, chưa flush data file; cập nhật buffer pool. Snapshot của transaction giữ version cũ cho các transaction khác.
+
+Bước 3. T2: `SAVEPOINT before_audit`. Engine đánh marker trong WAL, tốn vài byte. Một INSERT audit_log đã chèn từ trước savepoint (giả sử log thử ở T1.5) vẫn giữ trong transaction.
+
+Bước 4. T3: `INSERT INTO audit_log(account_id, amount) VALUES (1, -100)`. Application gọi `ROLLBACK TO SAVEPOINT before_audit` khi phát hiện lỗi: engine đọc undo log, revert các thay đổi từ savepoint tới hiện tại. Trạng thái: UPDATE ở T2 vẫn giữ (balance 900), INSERT lỗi đã revert. Transaction vẫn mở.
+
+Trạng thái sau bước 4:
+
+| Thành phần | Trước BEGIN | Sau bước 4 (trước COMMIT) |
+|---|---|---|
+| accounts.id=1.balance | 1000 | 900 (chưa flush data file) |
+| WAL | rỗng | có 2 redo record + savepoint marker |
+| undo log | rỗng | có 1 entry cho UPDATE |
+| audit_log | 1 row cũ | 1 row cũ, INSERT lỗi đã revert |
+
+Bước 5. T4: `UPDATE accounts SET balance = balance + 100 WHERE id = 2` (balance 500 → 600). Ghi redo mới, undo mới. Hai UPDATE đã vào WAL.
+
+Bước 6. T5: `COMMIT`. Engine ghi COMMIT record, `fsync` WAL xuống disk (~1-10 ms tuỳ disk). Sau khi fsync, COMMIT trả OK cho application. Data file chưa flush, sẽ flush sau qua checkpoint.
+
+Biến thể "nếu COMMIT chậm": disk I/O tắc nghẽn, `fsync` mất 5 giây. WAL phình, connection pool hết vì connection giữ xuyên COMMIT. Replication lag tăng vì replica phải apply WAL khi COMMIT xong. Bài học: giữ transaction ngắn (< 1 giây) để tránh phình WAL và block connection pool. Theo [acid-properties](acid-properties.md), D (durability) chỉ đảm bảo khi WAL đã fsync.
+
+Điều rút ra: COMMIT thành công chỉ đảm bảo WAL đã bền, không đảm bảo data file đã flush; đây là lý do câu hỏi 3B-10 ("COMMIT trả OK có nghĩa là dữ liệu đã flush xuống data file chưa?") có đáp án "Không nhất thiết".
+
+
+## 3. Câu hỏi phỏng vấn
+
+### 3A. Câu hỏi đào sâu
+
+<details class="qa">
+<summary>Câu 1. Định nghĩa transaction là gì, và tại sao "tất cả hoặc không" lại quan trọng?</summary>
+
+**Trả lời ngắn:** Transaction là đơn vị công việc gồm một hoặc nhiều câu SQL được engine xử lý nguyên tử. Hoặc COMMIT áp dụng vĩnh viễn toàn bộ câu, hoặc ROLLBACK huỷ hết như thể chưa chạy. Tính nguyên tử quan trọng vì nhiều nghiệp vụ chạm nhiều dòng và không được phép rơi vào trạng thái nửa vời (tiền trừ mà chưa cộng, đơn hàng tạo mà không trừ kho).
+
+**Đào sâu:**
+- Nguyên tử đảm bảo bởi WAL + undo log: mỗi thay đổi ghi cả redo (để redo khi crash) và undo (để revert khi rollback). Xem chi tiết [write-ahead-log](write-ahead-log.md).
+- COMMIT thành công nghĩa là WAL đã fsync xuống disk; sau đó crash vẫn khôi phục được. ROLLBACK nghĩa là undo log được áp ngược, không để lại dấu vết ở data file.
+- Không có transaction, mỗi câu SQL chạy độc lập → nửa vời dễ xảy ra với nhiều lệnh liên tiếp.
+- Tính nguyên tử chỉ đúng trong giới hạn engine: nếu dùng statement-level replication, một số statement có thể đã chạy ở replica trước khi COMMIT.
+
+**Bẫy:** "Transaction chỉ cần thiết cho INSERT/UPDATE, không cần cho SELECT". Sai — SELECT trong transaction vẫn quan trọng vì nó đọc một snapshot nhất quán, tránh đọc phải dữ liệu nửa vời giữa hai lần UPDATE.
+
+**Follow-up:** Nếu COMMIT đã trả OK mà sau đó disk hỏng, dữ liệu có còn không? Có, vì WAL đã fsync trước COMMIT. Khôi phục dùng WAL để redo các thay đổi đã commit nhưng chưa flush xuống data file.
+</details>
+
+<details class="qa">
+<summary>Câu 2. Phân biệt COMMIT và ROLLBACK về chi phí và đảm bảo bền vững.</summary>
+
+**Trả lời ngắn:** COMMIT yêu cầu WAL flush xuống disk (fsync) trước khi trả OK; ROLLBACK chỉ cần áp ngược undo log, không cần flush thêm. Cả hai đều có chi phí tỉ lệ với lượng thay đổi đã ghi trong transaction.
+
+**Đào sâu:**
+- COMMIT đảm bảo durability (D trong ACID): sau khi trả OK, dữ liệu đã được WAL ghi bền. Crash sau đó vẫn khôi phục được. Xem [acid-properties](acid-properties.md).
+- ROLLBACK chi phí tỉ lệ lượng thay đổi: một transaction UPDATE 10 triệu dòng rồi ROLLBACK tốn thời gian revert 10 triệu dòng, không phải vì ROLLBACK chậm mà vì đã ghi quá nhiều.
+- PostgreSQL COMMIT đồng bộ: WAL flush fsync có thể tốn ~1-10 ms tuỳ disk. InnoDB có thể group commit nhiều transaction trong một fsync để giảm overhead.
+- Sau COMMIT, data file có thể chưa flush ngay; checkpoint sau đó mới đẩy data page xuống disk. WAL đủ để khôi phục vì vậy delay flush an toàn.
+
+**Bẫy:** "ROLLBACK không tốn chi phí vì không ghi thêm". Sai — ROLLBACK phải đọc undo log và viết ngược trạng thái cũ vào buffer; với transaction đã ghi nhiều, chi phí đáng kể.
+
+**Follow-up:** Trong InnoDB, nếu COMMIT chậm vì fsync, dùng `innodb_flush_log_at_trx_commit = 2` có an toàn không? Mất tối đa 1 giây dữ liệu khi OS crash (chưa kịp flush từ OS cache xuống disk). Cấu hình phổ biến cho throughput cao nhưng không dùng cho hệ thống tài chính.
+</details>
+
+<details class="qa">
+<summary>Câu 3. Auto-commit hoạt động thế nào và khi nào nên tắt?</summary>
+
+**Trả lời ngắn:** Auto-commit mặc định bật trong hầu hết RDBMS (PostgreSQL, MySQL, SQL Server): mỗi câu SQL là một transaction ngầm, tự COMMIT khi chạy xong. Nên tắt khi cần nhiều câu cùng thành một đơn vị nguyên tử (chuyển tiền, đặt hàng nhiều bước).
+
+**Đào sâu:**
+- PostgreSQL: mặc định `autocommit = on`. `BEGIN` tạm tắt autocommit đến `COMMIT`/`ROLLBACK` hoặc gọi lại `SET autocommit = on`.
+- MySQL InnoDB: mặc định autocommit on. `START TRANSACTION` (hoặc `BEGIN`) tắt autocommit tạm thời.
+- Oracle không có `BEGIN` chuẩn: transaction bắt đầu ngầm khi chạy câu DML đầu tiên, kết thúc khi COMMIT/ROLLBACK hoặc thoát session.
+- Ưu điểm auto-commit: mỗi câu bền vững ngay, không phải lo quên COMMIT. Nhược: nếu một nghiệp vụ cần 3 câu và quên gộp, có thể rơi vào trạng thái nửa vời.
+
+**Bẫy:** "Trong PostgreSQL, `BEGIN` mở transaction nhưng không tắt autocommit vĩnh viễn". Đúng — chỉ tắt tạm thời đến khi transaction kết thúc. Nhiều người nhầm rằng cần gọi `SET autocommit = off`.
+
+**Follow-up:** Trong driver như psycopg2 (Python) hoặc pgx (Go), autocommit mặc định bật. Cách nào thường dùng để chạy nhiều câu trong một transaction? Bắt đầu transaction: `BEGIN`, thực thi, `COMMIT` hoặc dùng connection context manager (`with conn:` trong psycopg2, `tx := conn.Begin()` trong pgx).
+</details>
+
+<details class="qa">
+<summary>Câu 4. Savepoint khác gì với sub-transaction, và khi nào nên dùng?</summary>
+
+**Trả lời ngắn:** Savepoint là điểm đánh dấu trong transaction hiện tại; `ROLLBACK TO SAVEPOINT` huỷ thay đổi sau điểm đó mà vẫn giữ transaction mở và giữ các thay đổi trước đó. Khác với nested transaction: nested thường độc lập commit/rollback; savepoint thuộc cùng transaction cha.
+
+**Đào sâu:**
+- Cú pháp: PostgreSQL/MySQL/Oracle `SAVEPOINT name; ... ROLLBACK TO SAVEPOINT name; RELEASE SAVEPOINT name;` (Oracle dùng từ khoá khác một chút, không chắc chi tiết).
+- Savepoint lồng: PostgreSQL và Oracle cho phép; MySQL InnoDB chỉ một cấp.
+- Dùng khi: batch nhiều bước mà một số bước có thể fail nhưng muốn tiếp tục (retry từng phần, log lỗi, tiếp tục với batch khác).
+- Chi phí: savepoint ghi marker trong WAL/undo; rollback to savepoint tốn chi phí revert các thay đổi từ savepoint tới hiện tại.
+
+**Bẫy:** "Savepoint giống BEGIN/COMMIT con". Không hẳn — savepoint không có ID riêng để rollback/ commit độc lập (PostgreSQL có sub-transaction qua savepoint nhưng commit/rollback vẫn vào transaction cha).
+
+**Follow-up:** Có thể lồng savepoint sâu 100 cấp không? Kỹ thuật được; chi phí quản lý stack tăng. Giữ số cấp thấp (< 5) trong thực tế.
+</details>
+
+<details class="qa">
+<summary>Câu 5. Transaction dài nguy hiểm ở điểm nào? Có số bậc độ lớn nào để đánh giá?</summary>
+
+**Trả lời ngắn:** Transaction dài phình WAL, giữ lock lâu, block vacuum/autovacuum, tăng conflict với transaction khác, có thể deadlock. Số bậc độ lớn: nên giữ < 1 giây cho khối lệnh thường, < vài giây cho batch nhỏ; > vài phút là vấn đề nghiêm trọng.
+
+**Đào sâu:**
+- WAL/undo phình: InnoDB rollback segment và PostgreSQL `pg_xact` đều cần lưu lại các phiên bản cũ để transaction khác đọc snapshot. Transaction càng lâu, undo càng nhiều → chậm.
+- Lock contention: PostgreSQL cảnh báo qua `pg_stat_activity.state = 'idle in transaction'`; MySQL InnoDB qua `information_schema.innodb_trx.trx_started`.
+- Vacuum bị block: PostgreSQL autovacuum phụ thuộc vào việc giải phóng dead tuple; transaction dài giữ `xmin` horizon → bloat table.
+- Quy tắc ngón tay cái: < 100ms cho khối lệnh thường, < 1s cho payment/order, < 10s cho batch nhỏ, cảnh báo > 30s.
+
+**Bẫy:** "Transaction dài chỉ chậm CPU". Sai — chủ yếu chậm vì I/O WAL, lock waiting, và chặn vacuum.
+
+**Follow-up:** Nếu cần xử lý 1 triệu dòng, chia batch nhỏ 1000 dòng/commit thay vì một transaction 1 triệu dòng? Đúng — batch 1000-10000 dòng thường là điểm cân bằng giữa throughput và lock duration. Xem thêm [optimistic-vs-pessimistic-locking](optimistic-vs-pessimistic-locking.md).
+</details>
+
+<details class="qa">
+<summary>Câu 6 (Debug). Replication lag lớn, nghi ngờ do transaction dài ở primary. Bạn điều tra thế nào?</summary>
+
+**Trả lời ngắn:** 1) Kiểm transaction đang mở và thời gian giữ. 2) Kiểm lock chờ. 3) Kiểm replica apply lag (PostgreSQL `pg_stat_replication`, MySQL `SHOW SLAVE STATUS`). 4) Tìm transaction nguyên nhân.
+
+**Đào sâu:**
+- Bước 1 (PostgreSQL): `SELECT pid, datname, state, xact_start, query FROM pg_stat_activity WHERE state IS NOT NULL ORDER BY xact_start LIMIT 20;` — `xact_start` cũ nhất là nghi ngờ nhất.
+- Bước 1 (MySQL): `SELECT * FROM information_schema.innodb_trx ORDER BY trx_started;` — `trx_started` cũ nhất.
+- Bước 2: `SELECT * FROM pg_locks WHERE NOT granted;` (PostgreSQL) hoặc `SELECT * FROM performance_schema.data_locks;` (MySQL 8).
+- Bước 3: PostgreSQL `SELECT now() - pg_last_xact_replay_timestamp();` trên replica; MySQL `Seconds_Behind_Master` trong `SHOW SLAVE STATUS`. Cảnh báo > 5s thường là vấn đề.
+- Bước 4: Nếu transaction > 30s, kiểm query trong transaction (lệnh SQL cụ thể nào đang chạy), xem có thể kill (`SELECT pg_terminate_backend(pid);`) hay không.
+- Nguyên nhân phổ biến: application quên COMMIT, lock wait do deadlock phụ, batch update không commit từng phần.
+
+**Bẫy:** Tăng `wal_receiver_timeout` thay vì xử lý transaction dài — chỉ giấu triệu chứng, không giải quyết root cause.
+
+**Follow-up:** `idle in transaction` > 1 phút nên xử lý ra sao? Cấu hình `idle_in_transaction_session_timeout = '60s'` (PostgreSQL) để tự kill. Trong MySQL InnoDB, `innodb_idle_transaction_timeout` (từ 8.0+). Sau đó truy root cause trong code.
+</details>
+
+<details class="qa">
+<summary>Câu 7 (Thiết kế). Thiết kế flow đặt hàng (order + inventory + payment) sao cho an toàn với transaction.</summary>
+
+**Trả lời ngắn:** Chia flow thành các transaction ngắn theo từng miền nhất quán (đặt hàng → trừ kho → thu tiền) và dùng outbox/retry để xử lý phần xuyên miền. Không giữ một transaction xuyên suốt 3 service.
+
+**Đào sâu:**
+- **Tại sao không một transaction lớn**: chạm nhiều service (HTTP, queue) thì không thể giữ transaction cơ sở dữ liệu xuyên suốt; lock + connection pool nghẽn.
+- **Pattern 1 (đơn giản)**: trong một cơ sở dữ liệu: một transaction lần lượt INSERT order, UPDATE inventory, INSERT payment, COMMIT. Khoảng vài chục ms.
+- **Pattern 2 (microservice + outbox)**: order service INSERT order trong transaction riêng; inventory/payment là dịch vụ khác có transaction riêng; dùng outbox queue để retry khi fail.
+- **Pattern 3 (saga)**: chia thành chuỗi bước có compensating action (rollback logic). Compensation không phải rollback DB mà là nghiệp vụ đảo.
+- **Lựa chọn**: đơn giản nhất là giữ nguyên trong một DB nếu cả ba bảng cùng DB và traffic không quá cao. Khi microservice, dùng outbox + idempotency key. Compensation chỉ khi business cho phép giao dịch không atomic (booking, travel).
+- **Idempotency**: mỗi bước có idempotency key để retry không double-charge.
+
+**Bẫy:** "Một transaction cho cả order + payment là an toàn nhất". Sai nếu hai hệ thống khác DB; transaction DB không bảo vệ khỏi fail giữa service. Outbox/saga phù hợp hơn.
+
+**Follow-up:** Khi nào nên dùng 2PC (two-phase commit) thay vì outbox/saga? Khi cần atomic giữa hai DB cùng hỗ trợ XA (PostgreSQL + MySQL XA, hoặc Oracle + SQL Server). Đổi lại: latency cao, coordinator là SPOF. Xem [two-phase-commit](two-phase-commit.md).
+</details>
+
+### 3B. Câu hỏi phỏng vấn liên quan
+
+<details class="qa">
+<summary>Câu 8. Phân biệt implicit transaction và explicit transaction.</summary>
+
+**Trả lời:** Implicit transaction là transaction ngầm do auto-commit mỗi câu SQL (PostgreSQL, MySQL InnoDB, SQL Server mặc định). Explicit transaction là transaction do ứng dụng mở bằng `BEGIN`/`START TRANSACTION` và đóng bằng `COMMIT`/`ROLLBACK`. Một nghiệp vụ nhiều câu cần explicit để nhóm thành đơn vị nguyên tử.
+</details>
+
+<details class="qa">
+<summary>Câu 9. Điều gì xảy ra nếu application crash giữa câu 2 trong transaction?</summary>
+
+**Trả lời:** Engine thấy connection đóng, rollback transaction đang mở và giải phóng lock. Mọi thay đổi trong transaction bị undo. Nếu câu 2 đã COMMIT một phần (không thể trong SQL chuẩn vì COMMIT đến sau cùng), không xảy ra. Nếu application tự retry, cần idempotency để không insert/order trùng.
+</details>
+
+<details class="qa">
+<summary>Câu 10. COMMIT trả OK có nghĩa là dữ liệu đã flush xuống data file chưa?</summary>
+
+**Trả lời:** Không nhất thiết. COMMIT trả OK nghĩa là WAL/redo log đã fsync xuống disk, không phải data file. Data file được flush sau qua checkpoint (PostgreSQL `checkpoint_timeout` mặc định 5 phút, InnoDB `innodb_max_dirty_pages_pct`). Khôi phục sau crash dùng WAL để redo các trang chưa flush.
+</details>
+
+<details class="qa">
+<summary>Câu 11. Deadlock xảy ra khi nào và cách engine xử lý?</summary>
+
+**Trả lời:** Deadlock khi hai transaction chờ lock của nhau vĩnh viễn (A giữ lock 1, đợi lock 2; B giữ lock 2, đợi lock 1). Engine phát hiện qua wait-for graph, chọn một nạn nhân (thường giao dịch nhỏ hơn), rollback nạn nhân, trả lỗi `40P01` (PostgreSQL) hoặc `ER_LOCK_DEADLOCK` (MySQL). Ứng dụng bắt lỗi và retry. Chi tiết ở [database-deadlock](database-deadlock.md).
+</details>
+
+<details class="qa">
+<summary>Câu 12. True or false: "Một transaction PostgreSQL có thể COMMIT khi connection đã đóng."</summary>
+
+**Trả lời:** Sai. COMMIT là thao tác trên connection còn mở. Khi connection đóng, transaction đang mở bị engine rollback. Một số client pool (psycopg2) commit khi đóng connection nhưng đó là hành vi client, không phải của engine.
+</details>
+
+<details class="qa">
+<summary>Câu 13. Khi nào nên dùng isolation level nào cho transaction?</summary>
+
+**Trả lời:** Mặc định RDBMS thường dùng READ COMMITTED (PostgreSQL, Oracle, SQL Server) hoặc REPEATABLE READ (MySQL InnoDB). Cần serial thật cho báo cáo tài chính → SERIALIZABLE (hoặc SSI trong PostgreSQL). Cần throughput cao cho phép read không lock → READ COMMITTED + MVCC. Chi tiết ở [database-isolation-levels](database-isolation-levels.md).
+</details>
+
+<details class="qa">
+<summary>Câu 14. Đọc "uncommitted data" từ transaction khác có được không? Nếu có thì tên gì?</summary>
+
+**Trả lời:** Được gọi là "dirty read". Chỉ cho phép ở isolation level READ UNCOMMITTED. Trong thực tế PostgreSQL không hỗ trợ dirty read (cấp thấp nhất READ COMMITTED, dùng snapshot MVCC). MySQL InnoDB hỗ trợ READ UNCOMMITTED nhưng thường không dùng vì dễ thấy dữ liệu rollback.
+</details>
+
+<details class="qa">
+<summary>Câu 15. So sánh implicit rollback và explicit ROLLBACK trong PostgreSQL.</summary>
+
+**Trả lời:** Cả hai đều chạy undo log, giải phóng lock, kết thúc transaction. Implicit rollback xảy ra khi connection đóng, statement timeout, hoặc engine phát hiện lỗi nghiêm trọng. Explicit ROLLBACK do application gửi lệnh. Về bản chất không khác; chỉ khác cách kích hoạt và khả năng ghi log/metric.
+</details>
+
+## 4. Đánh đổi và sự cố production
+
+### So sánh ba cách tổ chức transaction
+
+| Tiêu chí | Một transaction lớn | Nhiều transaction ngắn | Saga / outbox |
+|---|---|---|---|
+| Tính nguyên tử | Mạnh (một COMMIT) | Yếu hơn (cần idempotency) | Yếu nhất (compensation logic) |
+| Lock duration | Lâu, dễ contention | Ngắn, ít contention | Không lock xuyên service |
+| Latency end-to-end | Thấp (không network) | Trung bình | Cao (qua queue/retry) |
+| Phụ thuộc infra | Cùng DB | Cùng DB | Multi-service OK |
+| Khi service fail | Dễ (rollback DB) | Dễ (rollback từng phần) | Cần retry + compensation |
+| Phù hợp khi | Một DB, traffic thấp | Microservice, cần scale | Business cho phép không atomic |
+
+### Năm failure mode
+
+| Triệu chứng | Nguyên nhân gốc | Cách kiểm tra | Cách sửa |
+|---|---|---|---|
+| Replication lag tăng đột biến | Transaction dài ở primary giữ WAL/undo | `pg_stat_activity xact_start`, `innodb_trx.trx_started` | Giới hạn thời gian transaction, batch commit |
+| Vacuum không giải phóng dead tuple | Transaction cũ giữ horizon (`xmin`) | `pg_stat_activity state = 'idle in transaction'` | Kill session, retry; thêm `idle_in_transaction_session_timeout` |
+| Out of memory / connection exhausted | Connection pool không đóng transaction | `pg_stat_activity state` count, app log | Đóng transaction rõ ràng, giảm pool idle |
+| Deadlock liên tục giữa hai service | Thứ tự lock không nhất quán | `pg_stat_activity` + `pg_locks`, MySQL `SHOW ENGINE INNODB STATUS` | Thống nhất thứ tự lock theo index; retry với backoff |
+| COMMIT chậm (~100ms+) | fsync disk chậm, group commit không hoạt động | `iostat -x` (await, util), `pg_stat_wal`, InnoDB `log_lsn_write` | Group commit (`commit_delay`), ổ SSD riêng cho WAL |
+
+## 5. Cheat sheet
+
+| Chủ đề | Con số / quy tắc cần nhớ |
+|---|---|
+| Định nghĩa | Đơn vị nguyên tử gồm ≥ 1 câu SQL, COMMIT/ROLLBACK toàn bộ |
+| BEGIN | `BEGIN` hoặc `START TRANSACTION` (SQL chuẩn); Oracle không cần |
+| Auto-commit | Bật mặc định PostgreSQL/MySQL/SQL Server; tắt khi cần nhiều câu nguyên tử |
+| COMMIT | WAL fsync xuống disk trước khi trả OK; data file flush qua checkpoint |
+| ROLLBACK | Áp ngược undo log, chi phí tỉ lệ lượng thay đổi |
+| Savepoint | Đánh dấu điểm trong transaction, `ROLLBACK TO SAVEPOINT` huỷ một phần |
+| Thời gian transaction | < 1s cho OLTP thường; cảnh báo > 30s; > vài phút là vấn đề nghiêm trọng |
+| MVCC | PostgreSQL/InnoDB dùng để cô lập giữa transaction, tránh read lock |
+| Lock + deadlock | Engine phát hiện qua wait-for graph, rollback nạn nhân, app retry |
+| Khi connection đóng | Engine rollback transaction đang mở |
+
+**Học tiếp:**
+- [acid-properties](acid-properties.md) — A, C, I, D chi tiết
+- [database-isolation-levels](database-isolation-levels.md) — Read uncommitted/committed, repeatable read, serializable
+- [write-ahead-log](write-ahead-log.md) — WAL đảm bảo D và khôi phục sau crash
+- [two-phase-commit](two-phase-commit.md) — atomic giữa nhiều DB, đánh đổi latency/SPOF

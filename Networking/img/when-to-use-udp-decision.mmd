@@ -1,0 +1,20 @@
+flowchart LR
+    Start["Cần gửi<br/>dữ liệu?"]
+    Q1{"Dữ liệu cũ<br/>vô giá trị?"}
+    Q2{"Cần multicast<br/>/ broadcast?"}
+    Q3{"Request-response<br/>1 RTT, payload nhỏ?"}
+    Q4{"Tự code reliability<br/>+ congestion control?"}
+    Q5{"Cần đúng thứ tự<br/>+ đủ dữ liệu?"}
+    UDP["UDP thuần"]
+    QUIC["QUIC / HTTP/3<br/>(reliable trên UDP)"]
+    TCP["TCP"]
+    Start --> Q1
+    Q1 -- "Có: game state,<br/>telemetry, RTP" --> Q2
+    Q1 -- "Không" --> Q5
+    Q2 -- "Có: DHCP, mDNS" --> UDP
+    Q2 -- "Không" --> Q3
+    Q3 -- "Có: DNS, NTP" --> UDP
+    Q3 -- "Không" --> Q4
+    Q4 -- "Có: WebRTC,<br/>custom game" --> UDP
+    Q4 -- "Không, cần reliable" --> QUIC
+    Q5 -- "Có: API, file,<br/>thanh toán" --> TCP

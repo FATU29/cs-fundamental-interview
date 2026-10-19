@@ -1,0 +1,7 @@
+flowchart LR
+    App["Application<br/>(HTTP client, DB driver,<br/>RPC framework)"]
+    Sock["Socket API<br/>(connect, accept,<br/>send, recv)"]
+    Tcp["TCP<br/>3-way handshake<br/>seq · ack · retransmit"]
+    Ip["IP<br/>(routing, MTU,<br/>fragmentation)"]
+    Nic["NIC / driver<br/>(ring buffer, GRO, RSS)"]
+    App --> Sock --> Tcp --> Ip --> Nic

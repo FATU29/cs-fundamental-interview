@@ -1,0 +1,359 @@
+# What is priority inversion?
+
+> Bài này giải thích priority inversion khi luồng ưu tiên cao bị chặn bởi luồng ưu tiên thấp đang giữ mutex, đặc biệt khi luồng ưu tiên trung bình preempt luồng ưu tiên thấp — kéo dài thời gian chờ vô hạn, ví dụ Mars Pathfinder 1997. Bài trình bày ba giải pháp: priority inheritance (RTOS Linux, VxWorks, FreeRTOS), priority ceiling, và disable preemption, cùng API `pthread_mutexattr_setprotocol(PTHREAD_PRIO_INHERIT)`. Bài [mutex-vs-semaphore](mutex-vs-semaphore.md) nền tảng mutex; bài [os-deadlock](os-deadlock.md) và [dining-philosophers-problem](dining-philosophers-problem.md) về deadlock.
+
+Chủ đề: Operating Systems · Ngày: 2026-10-16
+
+## 1. Là gì
+
+Priority inversion là tình huống luồng ưu tiên cao bị chặn bởi luồng ưu tiên thấp đang giữ mutex, trong khi một luồng ưu tiên trung bình chạy xen vào, kéo dài thời gian chờ của luồng cao. Hệ quả: thời gian chờ phụ thuộc hành vi luồng trung — không thể đảm bảo deadline real-time.
+    10|
+Ba tác nhân: luồng cao (H), luồng thấp (L), luồng trung (M). L giữ mutex, H xin mutex → H đợi. Scheduler đánh thức M (vì M > L), M preempt L, M chạy lâu → L không nhả mutex → H tiếp tục chờ. Cả ba vẫn "sống", nhưng thời gian chờ H vượt tầm kiểm soát.
+
+```mermaid
+flowchart LR
+    Sched["Scheduler<br/>(priority-based)"]
+    H["Thread H<br/>(high priority)"]
+    M["Thread M<br/>(medium priority)"]
+    L["Thread L<br/>(low priority)"]
+    Mut["Mutex<br/>(shared resource)"]
+    H -.xin.-> Mut
+    L -.giữ.-> Mut
+    Sched --> H
+    Sched --> M
+    Sched --> L
+```
+
+*Sơ đồ vị trí: scheduler phân phối CPU theo priority; L giữ mutex, H xin mutex và đợi; M preempt L trong lúc L đang giữ mutex — kéo dài thời gian chờ của H vượt dự kiến.*
+
+### Trả lời 30 giây
+
+"Priority inversion xảy ra khi luồng ưu tiên cao chờ luồng ưu tiên thấp giữ mutex, và luồng ưu tiên trung bình preempt luồng thấp trước khi luồng thấp nhả mutex. Hệ quả: thời gian chờ của luồng cao bị kéo dài vô tận. Ví dụ nổi tiếng: Mars Pathfinder (1997) bị system reset nhiều lần do priority inversion trong bus task. Ba giải pháp chính: (1) priority inheritance — luồng thấp tạm thời được nâng priority bằng luồng cao nhất đang chờ mutex, đảm bảo nó không bị preempt; (2) priority ceiling — mỗi mutex có priority cố định, luồng giữ mutex chạy ở ceiling; (3) disable preemption trong critical section — đơn giản nhưng giảm concurrency. Linux pthread hỗ trợ `PTHREAD_PRIO_INHERIT` qua `pthread_mutexattr_setprotocol`; RTOS như VxWorks/FreeRTOS dùng priority inheritance mặc định."
+
+## 2. Cơ chế cốt lõi
+
+### Bước 1. Timeline priority inversion cổ điển
+
+```mermaid
+sequenceDiagram
+    participant L as Thread L (low)
+    participant M as Thread M (medium)
+    participant H as Thread H (high)
+    participant Sched as Scheduler
+    L->>Sched: chạy (priority thấp)
+    L->>L: lock(mutex)
+    L->>L: vào critical section
+    Sched-->>H: đánh thức H (H ready)
+    H->>Sched: xin mutex
+    Sched-->>H: blocked (L giữ)
+    Sched-->>M: đánh thức M (M > L)
+    M->>M: chạy lâu, không liên quan mutex
+    Note over L,M: L bị preempt, không release mutex
+    M->>Sched: hoàn tất, sleep
+    Sched-->>L: chạy tiếp critical section
+    L->>L: unlock(mutex)
+    Sched-->>H: H được mutex, chạy
+```
+
+*Timeline: L giữ mutex; H ready và xin mutex; M preempt L; M chạy xong; L chạy tiếp và nhả mutex; H chạy. Tổng thời gian H chờ = critical section của L + thời gian M chạy — có thể rất dài.*
+
+### Bước 2. Tại sao priority inversion nguy hiểm hơn deadlock
+
+- Deadlock: tất cả các bên đều block, dễ phát hiện (thread stuck).
+- Priority inversion: cả ba thread đều "chạy" (H đợi, L làm critical section, M chạy nghiệp vụ khác), khó phát hiện từ bên ngoài. Không có stack trace nào in "deadlock". Vấn đề chỉ thể hiện qua deadline bị miss.
+- Hệ thống real-time (aerospace, medical, automotive) cần deadline đảm bảo — priority inversion có thể gây hậu quả nghiêm trọng.
+
+### Bước 3. Mars Pathfinder — case study
+
+NASA Mars Pathfinder (1997) gặp reset hệ thống nhiều lần. Bus task (priority trung bình) preempt meteorological task (priority thấp) đang giữ mutex chia sẻ với comm task (priority cao). Comm task phải đợi meteorological, bị trì hoãn quá watchdog timeout → reset. Debug từ xa qua telemetry log. Fix: bật priority inheritance qua flag runtime. Bài học: priority inversion là vấn đề "lúc nào cũng có thể xảy ra" trong hệ thống có nhiều mức priority.
+
+### Bước 4. Priority inheritance
+
+```c
+// Khi H xin mutex mà L đang giữ:
+// L tạm thời được nâng priority = max(priority(L), priority(H))
+// Scheduler chạy L ngay, không cho M preempt
+// L hoàn tất critical section, nhả mutex
+// L khôi phục priority ban đầu
+// H lấy mutex và chạy
+```
+
+Priority inheritance chỉ áp dụng cho mutex, không cho semaphore. POSIX `pthread_mutexattr_setprotocol(PTHREAD_PRIO_INHERIT)` kích hoạt. Khi nhiều thread cao đang chờ cùng một mutex, thread giữ mutex được nâng lên priority cao nhất trong số đó.
+
+### Bước 5. Priority ceiling
+
+Mỗi mutex có priority cố định (ceiling). Khi thread lấy mutex, nó chạy ở ceiling priority cho tới khi nhả. Tránh deadlock kiểu "A giữ mutex 1 ceiling 5, xin mutex 2 ceiling 7" bằng quy tắc ceiling ≥ priority cao nhất của mutex có thể xin. POSIX: `PTHREAD_PRIO_PROTECT` qua `pthread_mutexattr_setprotocol`, kèm `pthread_mutexattr_setprioceiling`.
+
+### Bước 6. Disable preemption
+
+Critical section chạy với `preempt_disable` — scheduler không thể đánh thức thread khác. Đơn giản nhất nhưng giảm concurrency (mọi thread khác đợi). Thường dùng trong kernel Linux cho spinlock ngắn. Không phù hợp critical section dài (> vài chục microsecond) vì giảm responsiveness. Nhược điểm cốt lõi: nếu critical section gọi hàm có thể ngủ (mutex khác, I/O), hệ thống treo vì scheduler không thể unlock.
+
+### Bước 7. So sánh ba giải pháp
+
+| Giải pháp | Độ phức tạp | Overhead runtime | Đảm bảo | Hỗ trợ POSIX |
+|---|---|---|---|---|
+| Priority inheritance | Trung bình | Thấp (chỉ khi có contention) | Có (bounded inversion) | `PTHREAD_PRIO_INHERIT` |
+| Priority ceiling | Trung bình | Thấp | Có (zero inversion) | `PTHREAD_PRIO_PROTECT` |
+| Disable preemption | Thấp | Trung bình | Có (zero inversion) | `pthread_setconcurrency`/sched_yield |
+
+### Bước 8. Quan sát
+
+```bash
+# Linux: kiểm tra priority inheritance có bật không
+pthread_mutexattr_init(&attr);
+pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_INHERIT);
+pthread_mutex_init(&mtx, &attr);
+
+# Xem thread priority
+chrt -p <pid>    # SCHED_FIFO/SCHED_RR có priority cụ thể
+
+# Trace scheduling
+perf sched record -e sched:sched_wakeup -e sched:sched_switch
+```
+
+### Ví dụ chạy từng bước
+
+Kịch bản: hệ thống sensor gồm 3 task — `L` (logging, priority thấp, ghi vào flash), `M` (UI cập nhật, priority trung bình), `H` (alarm, priority cao, deadline cứng 10 ms). Cả ba chia sẻ một `flash_mutex`. Critical section ghi flash của L mất 2 ms (ghi block 4 KB + sync).
+
+**Bước 1 (t = 0):** L được scheduler cấp CPU, gọi `pthread_mutex_lock(&flash_mutex)` — thành công. L vào critical section, bắt đầu ghi block 4 KB.
+
+**Bước 2 (t = 1 ms):** Alarm trigger ngoài, H ready và gọi `pthread_mutex_lock(&flash_mutex)`. H block vì L giữ. L vẫn đang trong critical section, còn ~1 ms nữa.
+
+**Bước 3 (t = 1 ms):** M ready (cập nhật UI định kỳ). Vì M > L, scheduler preempt L và cho M chạy. M chạy logic UI trong 7 ms — không đụng mutex.
+
+**Bước 4 (t = 1 → 8 ms):** M chiếm CPU. L không được chạy, không thể nhả mutex. H tiếp tục block, đã chờ 8 ms mà chưa vào critical section.
+
+**Trạng thái tại t = 8 ms:**
+
+| task | priority | trạng thái | thời gian chờ H |
+|---|---|---|---|
+| H (alarm) | cao | BLOCKED trên flash_mutex | 7 ms (đã vượt deadline 10 ms sắp tới) |
+| L (logging) | thấp | READY nhưng bị M preempt | — |
+| M (UI) | trung bình | RUNNING | — |
+
+**Bước 5 (t = 8 ms):** M sleep. L chạy tiếp 1 ms CS còn lại, `unlock(&flash_mutex)` lúc t = 9 ms. H lấy mutex, hoàn thành đúng deadline t = 11 ms (ready lúc t = 1 ms + 10 ms). Nếu M chạy thêm 1 ms thì deadline bị miss — đã tính lại timeline bằng `node -e`: H chờ 9 ms khi M = 7 ms.
+
+**Bước 6 (fix bằng priority inheritance):** Bật `pthread_mutexattr_setprotocol(PTHREAD_PRIO_INHERIT)` cho `flash_mutex`. Tại t = 1 ms, khi H xin mutex mà L giữ, kernel nâng tạm priority L lên bằng H. M không preempt được. L chạy tiếp 1 ms CS còn lại, unlock t = 2 ms. H lấy mutex ngay t = 2 ms — đã tính lại: H chờ giảm từ 9 ms còn 1 ms.
+
+**Biến thể "nếu quá tải":** M là task CPU-bound chạy 30 ms thay vì 7 ms. Không có priority inheritance, H chờ ~30 ms, deadline 10 ms bị miss → watchdog reset (kịch bản Mars Pathfinder 1997). Priority inheritance giới hạn thời gian chờ bằng tổng CS của L, bất kể M chạy bao lâu.
+
+Điều rút ra: ví dụ cho thấy priority inversion khác deadlock ở chỗ cả ba task đều "sống", chỉ có H bị trễ — đúng câu hỏi 1 phần 3A về phân biệt priority inversion với deadlock và starvation.
+
+## 3. Câu hỏi phỏng vấn
+
+### 3A. Câu hỏi đào sâu
+
+<details class="qa">
+<summary>Câu 1. Phát biểu priority inversion và chỉ ra ba tác nhân. Khác deadlock thế nào?</summary>
+
+**Trả lời ngắn:** Ba tác nhân: thread H (priority cao), thread L (priority thấp, giữ mutex), thread M (priority trung bình). Timeline: L lock mutex; H ready, xin mutex, blocked; M preempt L; M chạy xong; L chạy tiếp critical section; L unlock; H chạy. Khác deadlock: cả ba vẫn "chạy" (H đợi, L làm critical section, M chạy việc khác), không thread nào block hoàn toàn. Deadlock thì tất cả cùng block, dễ phát hiện qua thread dump; priority inversion khó phát hiện, chỉ thấy deadline bị miss.
+
+**Đào sâu:**
+- H bị block vì L giữ mutex — đúng kỳ vọng (mutex bảo vệ dữ liệu).
+- M preempt L — không liên quan mutex. M không xin mutex, nhưng vì M > L, scheduler cho M chạy.
+- Tổng thời gian H chờ = (critical section còn lại của L) + (thời gian M chạy). M chạy càng lâu, H càng chờ.
+- "Unbounded priority inversion" xảy ra khi M có thể chạy vô hạn (ví dụ M là CPU-bound job không bao giờ nhường).
+- Real-time system cần bounded inversion — đó là lý do priority inheritance ra đời.
+
+**Bẫy:** "Priority inversion = thread starvation". Khác — starvation là một thread không bao giờ được chạy (do scheduler bỏ qua). Priority inversion là thread chạy nhưng thời gian chờ vượt mức.
+
+**Follow-up:** Làm sao phát hiện priority inversion runtime? Đo "mutex hold time" và "lock owner priority"; nếu thread ưu tiên cao chờ mutex quá lâu, cảnh báo.
+</details>
+
+<details class="qa">
+<summary>Câu 2. Priority inheritance hoạt động thế nào? Khi nào nâng priority?</summary>
+
+**Trả lời ngắn:** Khi thread H xin mutex mà thread L đang giữ, hệ thống nâng priority của L lên bằng priority của H (hoặc priority cao nhất trong các thread đang chờ mutex). L chạy ở priority cao cho tới khi unlock, không bị M preempt. Sau unlock, L trở về priority gốc; H lấy mutex và chạy.
+
+**Đào sâu:**
+- Quy tắc: priority của thread giữ mutex ≥ max priority của mọi thread đang chờ mutex đó. Đảm bảo bằng cách dynamic update priority.
+- L chỉ "mượn" priority, không thay đổi vĩnh viễn. Khi unlock, priority khôi phục.
+- Transitive: nếu L giữ mutex 1, xin A_mutex 2 mà T khác giữ → T được nâng priority. Sau đó A_mutex nhả → T về priority cũ, L xuống một bậc.
+- Overhead: O(1) cho mỗi lock/unlock, chỉ khi có thread chờ. Không ảnh hưởng khi mutex không bị contend.
+- POSIX: `PTHREAD_PRIO_INHERIT`. FreeRTOS: `mutex.attr.usePI = 1`. VxWorks: mặc định đã có.
+
+**Bẫy:** "Priority inheritance chỉ áp dụng cho mutex, không cho semaphore". Đúng — POSIX pthread_rwlock cũng có thể, nhưng semaphore counting thì không, vì semaphore không "sở hữu" bởi thread cụ thể.
+
+**Follow-up:** Có cần bật priority inheritance cho mọi mutex không? Không — chỉ những mutex chia sẻ giữa thread khác priority. Mutex trong cùng một thread pool priority đồng đều không cần.
+</details>
+
+<details class="qa">
+<summary>Câu 3. Priority ceiling khác priority inheritance thế nào?</summary>
+
+**Trả lời ngắn:** Priority ceiling gán priority cố định cho mỗi mutex khi khởi tạo. Khi thread lấy mutex, priority của nó tạm thời lên ceiling. Inheritance chỉ nâng khi có thread cao đang chờ; ceiling luôn nâng khi giữ mutex. Cả hai đều tránh priority inversion, nhưng ceiling có cost khi không có inversion thật.
+
+**Đào sâu:**
+- Ceiling: thread giữ mutex chạy ở priority cao → không bất kỳ thread nào preempt được nó → critical section ngắn, nhanh xong.
+- Inheritance: chỉ nâng khi cần, tiết kiệm hơn.
+- Ceiling đảm bảo "zero inversion" — không có cơ hội priority inversion xảy ra vì không ai preempt được thread giữ mutex.
+- Inheritance đảm bảo "bounded inversion" — thread giữ mutex không bị thread trung bình preempt, nhưng vẫn có thể bị thread cao hơn nữa preempt.
+- POSIX: `PTHREAD_PRIO_PROTECT` cần `pthread_mutexattr_setprioceiling` để set ceiling value.
+- Overhead: ceiling có thêm phép so sánh priority khi lock (gán priority mới), inheritance chỉ check khi có waiter.
+
+**Bẫy:** "Priority ceiling = deadlock-free". Không hoàn toàn — ceiling vẫn có thể tạo deadlock nếu hai mutex ceiling khác nhau bị xin theo thứ tự ngược. Quy tắc: ceiling ≥ max priority của mutex có thể xin → tránh deadlock chuỗi.
+
+**Follow-up:** Khi nào chọn ceiling thay vì inheritance? Khi deadlock là mối quan tâm chính, hoặc khi mutex được dùng xuyên nhiều module không kiểm soát priority.
+</details>
+
+<details class="qa">
+<summary>Câu 4. Tại sao priority inversion nguy hiểm cho hệ thống real-time?</summary>
+
+**Trả lời ngắn:** Real-time system cần deadline đảm bảo (hard real-time) hoặc thống kê (soft real-time). Priority inversion khiến thời gian chờ của task cao không thể dự đoán — có thể vượt deadline, gây lỗi hệ thống. Ví dụ Mars Pathfinder, Airbus A330 fly-by-wire cũng gặp vấn đề tương tự.
+
+**Đào sâu:**
+- Hard real-time (Mars rover, brake controller): deadline miss có thể gây hỏng phần cứng, mất mạng. Priority inversion phải được bound chặt.
+- Soft real-time (video streaming, audio): deadline miss gây glitch, không nguy hiểm nhưng UX tệ.
+- Worst-case latency với priority inversion: O(MaxHoldTime + SumOfMidTaskRuntime) — không thể tính chính xác trong hệ thống lớn.
+- Với priority inheritance, worst-case = O(MaxHoldTime × ChainLength), vẫn nhưng bounded và dự đoán được.
+- Certifiable RTOS (DO-178C, IEC 61508) yêu cầu phân tích worst-case execution time (WCET); priority inversion làm phân tích phức tạp.
+- Linux kernel dùng `preempt_disable` cho spinlock, `rt_mutex` (priority inheritance) cho mutex có thể ngủ.
+
+**Bẫy:** "Real-time Linux có priority inheritance mặc định". Sai — vanilla Linux dùng `PREEMPT_RT` patch mới có, mặc định kernel không có RT-mutex cho user-space. User cần tự bật qua `pthread_mutexattr_setprotocol`.
+
+**Follow-up:** RTOS nào hỗ trợ priority inheritance tốt nhất? VxWorks, FreeRTOS (tùy config), QNX, RTEMS — đa số RTOS thương mại đều có.
+</details>
+
+<details class="qa">
+<summary>Câu 5. Trong Linux kernel, spinlock có bị priority inversion không? Cách xử lý?</summary>
+
+**Trả lời ngắn:** Có, nhưng kernel xử lý bằng `preempt_disable`: khi giữ spinlock, scheduler không thể preempt thread khác. Critical section phải cực ngắn (< vài chục microsecond) vì không có mutex sleep. Nếu cần ngủ, dùng `rt_mutex` (priority inheritance) thay.
+
+**Đào sâu:**
+- Spinlock + preempt_disable: thread giữ spinlock không bị preempt → không ai preempt được → priority inversion không xảy ra. Nhược: nếu critical section dài, hệ thống treo.
+- `rt_mutex` trong Linux kernel: priority inheritance cho mutex có thể ngủ. Khi một thread cao xin rt_mutex đang bị giữ, thread thấp được nâng priority.
+- Linux kernel pre-RT: priority inheritance chỉ cho rt_mutex, không cho mutex thường. Mutex thường dùng cho interrupt context ngắn.
+- Với `PREEMPT_RT` patch (CONFIG_PREEMPT_RT): hầu hết spinlock được thay bằng rt_mutex, làm Linux kernel gần như fully preemptive.
+- Kernel thread RT (`SCHED_FIFO`, `SCHED_RR`): dùng `rt_mutex` cho resource chia sẻ giữa user-space và kernel-space.
+
+**Bẫy:** "Spinlock trong Linux không có priority inversion". Sai — kernel xử lý bằng preempt_disable, nhưng đó là giải pháp triệu chứng, không phải giải pháp priority inheritance.
+
+**Follow-up:** Khi nào nên dùng mutex thay spinlock? Khi critical section có thể chạy > vài chục microsecond, hoặc có thể ngủ (gọi hàm có thể block).
+</details>
+
+<details class="qa">
+<summary>Câu 6 (Debug). Service có task chạy định kỳ mỗi 100ms đôi khi mất 500ms. Bạn điều tra thế nào?</summary>
+
+**Trả lời ngắn:** Nghi priority inversion. Đo thời gian giữ mutex và priority các thread. Nếu task có priority cao thỉnh thoảng chờ mutex quá lâu, có khả năng priority inversion. Kiểm tra có thread priority trung bình preempt thread thấp đang giữ mutex không.
+
+**Đào sâu:**
+- Bước 1: log timestamp `lock_acquired`, `lock_released` cho mỗi mutex. Tính `hold_time`.
+- Bước 2: log priority của thread giữ mutex và thread cao nhất đang chờ.
+- Bước 3: nếu thấy hold_time > 100ms và priority inversion chain xuất hiện → root cause.
+- Bước 4: bật priority inheritance cho mutex nghi ngờ, theo dõi lại.
+- Bước 5: nếu không dùng POSIX pthread, kiểm tra có flag priority inheritance trong OS không (RTOS thường có).
+- Bước 6: dùng `perf sched latency` để xem wakeup latency của task cao.
+- Bước 7: xác nhận fix bằng cách tạo test load pattern giống production.
+
+**Bẫy:** "Tăng priority của task bị chậm". Sai — không giải quyết root cause, chỉ làm priority inversion chain khác phát hiện.
+
+**Follow-up:** Làm sao monitor priority inversion liên tục trong production? Metric "max mutex wait time per high-priority task"; cảnh báo khi > threshold.
+</details>
+
+<details class="qa">
+<summary>Câu 7 (Thiết kế). Thiết kế sensor data pipeline với 3 task: high (alarm), medium (UI update), low (logging). Chọn giải pháp priority inversion nào?</summary>
+
+**Trả lời ngắn:** Dùng priority inheritance cho mọi mutex chia sẻ giữa ba task. Critical section ngắn (< 1ms), task logging giữ mutex không lâu. Alarm task deadline 10ms, phải đảm bảo. Có thể kết hợp priority ceiling nếu cần đảm bảo zero inversion cho mutex alarm chia sẻ.
+
+**Đào sâu:**
+- **Alarm task (high)**: deadline cứng, 10ms. Cần mọi mutex nó xin đều có priority inheritance (hoặc ceiling).
+- **UI task (medium)**: deadline mềm, 50ms. Ít nguy hiểm vì nó thường preempt logging task.
+- **Logging task (low)**: không có deadline nghiêm ngặt, chỉ chạy khi rảnh.
+- **Mutex alarm_data**: priority ceiling = priority alarm task. Khi logging task giữ, nó chạy ở ceiling, không bị UI preempt → alarm task chờ ít.
+- **Mutex buffer**: priority inheritance. Chỉ khi có thread cao đang chờ mới nâng priority.
+- **Monitoring**: log mutex hold time, alert nếu alarm task chờ > 5ms.
+- **Test**: tạo load pattern: logging giữ mutex 2ms; UI ready trong lúc đó; alarm task ready 1ms sau. Đảm bảo alarm task không bị delay > 5ms.
+
+**Bẫy:** Dùng một mutex global cho cả ba task — bottleneck và rủi ro priority inversion cao. Tách mutex theo từng resource.
+
+**Follow-up:** Khi nào dùng message queue thay mutex? Khi producer/consumer không cần đồng bộ chặt — alarm ghi message, logging task đọc qua queue lock-free (xem [mutex-vs-semaphore](mutex-vs-semaphore.md)).
+</details>
+
+### 3B. Câu hỏi phỏng vấn liên quan
+
+<details class="qa">
+<summary>Câu 8. Priority inversion có thể tự phát hiện qua log không?</summary>
+
+**Trả lời:** Khó. Priority inversion không in stack trace deadlock, không có error code. Chỉ thể hiện qua deadline bị miss. Cần monitor: `mutex_hold_time` theo từng mutex, `wait_time` của high-priority task, và compare với deadline. Nếu wait_time > deadline → cảnh báo.
+</details>
+
+<details class="qa">
+<summary>Câu 9. Priority inheritance có nhược điểm gì?</summary>
+
+**Trả lời:** Overhead khi update priority (O(số thread chờ)). Gây starvation cho thread ưu tiên thấp khác (nó bị skip liên tục). Transitive inheritance (A→B→C) phức tạp, dễ bug. Một số hệ thống không hỗ trợ. Linux user-space phải bật qua `pthread_mutexattr_setprotocol(PTHREAD_PRIO_INHERIT)`.
+</details>
+
+<details class="qa">
+<summary>Câu 10. FreeRTOS, VxWorks, RTEMS xử lý priority inversion thế nào?</summary>
+
+**Trả lời:** FreeRTOS: `xQueueCreateMutex` có flag `usePI` bật priority inheritance. VxWorks: priority inheritance mặc định cho tất cả mutex. RTEMS: hỗ trợ qua `pthread_mutexattr_setprotocol`. QNX: priority inheritance mặc định. Mỗi RTOS có API khác nhau nhưng cơ chế giống nhau: nâng priority thread giữ mutex lên bằng thread cao nhất đang chờ.
+</details>
+
+<details class="qa">
+<summary>Câu 11. True or false: "Mars Pathfinder bug là do lập trình viên quên bật priority inheritance."</summary>
+
+**Trả lời:** Sai (nghe đúng nhưng sai). Code đã có priority inheritance, nhưng flag runtime bị tắt trong phiên bản deploy. NASA debug từ xa, phát hiện qua telemetry log, bật lại flag qua upload lệnh. Bài học: priority inheritance phải bật theo mặc định cho mọi mutex chia sẻ, không để flag runtime quyết định.
+</details>
+
+<details class="qa">
+<summary>Câu 12. Priority ceiling vs priority inheritance: chọn cái nào cho hệ thống RTOS nhỏ?</summary>
+
+**Trả lời:** RTOS nhỏ (< 10 task) thường dùng priority ceiling vì dễ phân tích, zero overhead khi không có contention. RTOS lớn dùng priority inheritance vì overhead thấp hơn. Một số RTOS cho phép chọn per-mutex. Quan trọng: cả hai đều bounded inversion, an toàn cho hard real-time nếu cấu hình đúng.
+</details>
+
+<details class="qa">
+<summary>Câu 13. POSIX thread scheduling class nào ảnh hưởng đến priority inversion?</summary>
+
+**Trả lời:** `SCHED_FIFO` và `SCHED_RR` (real-time, priority 1-99 trên Linux) — có priority cố định, dễ bị priority inversion. `SCHED_OTHER` (default, CFS scheduler) — priority "nice" chỉ mang tính tương đối, ít gặp priority inversion nghiêm trọng. `SCHED_BATCH`, `SCHED_IDLE` — không real-time, không liên quan. Priority inheritance chỉ có ý nghĩa với real-time scheduling class.
+</details>
+
+<details class="qa">
+<summary>Câu 14. Tại sao Linux kernel không bật priority inheritance mặc định cho mọi mutex?</summary>
+
+**Trả lời:** Vì overhead. Mutex thường dùng trong kernel ngắn (< 1ms), `preempt_disable` rẻ hơn. Bật priority inheritance thêm O(waiters) mỗi lock/unlock. Với `PREEMPT_RT` patch, kernel gần như fully preemptive, mutex thường được thay bằng rt_mutex, nhưng patch chưa mainline trên mọi distro. User-space cần tự bật qua pthread API.
+</details>
+
+<details class="qa">
+<summary>Câu 15. Watchdog có phát hiện priority inversion không?</summary>
+
+**Trả lời:** Không trực tiếp. Watchdog reset khi deadline bị miss → có thể do priority inversion, deadlock, hoặc CPU overload. Mars Pathfinder dùng watchdog để phát hiện task comm (priority cao) bị treo, sau đó debug mới xác định priority inversion. Watchdog là công cụ phát hiện triệu chứng, không phải root cause analysis.
+</details>
+
+## 4. Đánh đổi và sự cố production
+
+### So sánh ba giải pháp
+
+| Giải pháp | Overhead | Bảo đảm | Độ phức tạp | Hỗ trợ OS |
+|---|---|---|---|---|
+| Priority inheritance | Thấp khi no contention | Bounded inversion | Trung bình | POSIX, RTOS |
+| Priority ceiling | Trung bình | Zero inversion | Trung bình | POSIX (`PTHREAD_PRIO_PROTECT`) |
+| Disable preemption | Thấy rõ (giảm CPU) | Zero inversion | Thấp | Mọi OS |
+| Lock-free (CAS) | Cao (best effort) | Không đảm bảo | Cao | Ngôn ngữ có atomic |
+
+### Năm failure mode
+
+| Triệu chứng | Nguyên nhân gốc | Cách kiểm tra | Cách sửa |
+|---|---|---|---|
+| Deadline task cao bị miss ngẫu nhiên | Priority inversion | Đo mutex hold time + wait time | Bật priority inheritance |
+| Latency p99 cao dù CPU thấp | Critical section dài giữ mutex | Profiler lock contention | Tách critical section, dùng rwlock |
+| System reset không rõ nguyên nhân (RTOS) | Watchdog timeout do inversion | Telemetry log mutex pattern | Bật PI, ceiling, hoặc restructure |
+| Test pass, production fail với load pattern khác | Stress test chưa cover chain priority | Thêm test với 3+ mức priority | Bật PI mặc định, smoke test trên RTOS |
+| Service chậm sau khi thêm task mới | Task mới priority trung bình preempt task thấp | Code review, audit priority | Đặt priority đúng cho task, bật PI |
+
+## 5. Cheat sheet
+
+| Chủ đề | Con số / quy tắc cần nhớ |
+|---|---|
+| Ba tác nhân | H (high), M (medium), L (low giữ mutex) |
+| Thời gian chờ của H | Critical section của L + thời gian M chạy |
+| Mars Pathfinder | 1997, system reset, fix bằng flag PI |
+| POSIX API | `pthread_mutexattr_setprotocol(PTHREAD_PRIO_INHERIT)` |
+| POSIX ceiling | `pthread_mutexattr_setprotocol(PTHREAD_PRIO_PROTECT)` |
+| Linux kernel | Spinlock dùng preempt_disable; rt_mutex có PI |
+| Real-time class | SCHED_FIFO/SCHED_RR với priority 1-99 |
+| RTOS có PI mặc định | VxWorks, QNX; FreeRTOS cần flag usePI |
+
+**Học tiếp:**
+- [os-deadlock](os-deadlock.md) — deadlock kinh điển
+- [dining-philosophers-problem](dining-philosophers-problem.md) — bài toán liên quan qua lock
+- [mutex-vs-semaphore](mutex-vs-semaphore.md) — mutex và semaphore
+- [priority-inversion](priority-inversion.md) — chính bài này (self-ref)

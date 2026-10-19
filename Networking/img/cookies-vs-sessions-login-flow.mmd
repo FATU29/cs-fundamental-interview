@@ -1,0 +1,18 @@
+sequenceDiagram
+  participant U as Browser
+  participant C as Client
+  participant S as Server
+  participant ST as SessionStore
+  U->>C: POST /login (user, pass)
+  C->>S: verify credential
+  S->>ST: save sid to user
+  S-->>C: 200 Set-Cookie sid
+  C->>U: store cookie
+  U->>C: GET /me Cookie sid
+  C->>S: lookup sid
+  S->>ST: GET sess:sid
+  ST-->>S: user
+  S-->>U: 200 user JSON
+  U->>C: POST /logout
+  C->>ST: DEL sess:sid
+  S-->>U: 204 Max-Age=0

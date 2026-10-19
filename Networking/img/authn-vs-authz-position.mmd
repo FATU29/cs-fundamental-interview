@@ -1,0 +1,9 @@
+flowchart LR
+  C["Client<br/>(browser, mobile, API)"]
+  T["TLS/mTLS<br/>authn máy"]
+  G["API Gateway<br/>verify JWT<br/>rate limit"]
+  S["Service<br/>nạp resource<br/>kiểm quyền"]
+  D["Database<br/>(resource)"]
+  I["IdP<br/>(authn thật:<br/>password, MFA)"]
+  C --> T --> G --> S --> D
+  G -.-> I

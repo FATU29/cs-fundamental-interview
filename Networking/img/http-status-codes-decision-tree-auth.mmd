@@ -1,0 +1,9 @@
+flowchart LR
+  A["Request"] --> P{"Parse được?<br/>cú pháp, JSON hợp lệ"}
+  P -- "không" --> R400["400 Bad Request"]
+  P -- "có" --> I{"Có danh tính<br/>hợp lệ?"}
+  I -- "không" --> R401["401 Unauthorized<br/>kèm WWW-Authenticate"]
+  I -- "có" --> Z{"Có quyền với<br/>tài nguyên này?"}
+  Z -- "không, được lộ" --> R403["403 Forbidden"]
+  Z -- "không, không được lộ" --> R404["404 Not Found"]
+  Z -- "có" --> NEXT["Tiếp tục ở<br/>decision-tree-data"]

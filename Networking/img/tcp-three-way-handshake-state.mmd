@@ -1,0 +1,9 @@
+stateDiagram-v2
+    [*] --> CLOSED
+    CLOSED --> LISTEN: passive open (listen)
+    CLOSED --> SYN_SENT: active open (connect)
+    LISTEN --> SYN_RCVD: nhận SYN
+    SYN_SENT --> SYN_RCVD: nhận SYN+ACK (simul-open)
+    SYN_SENT --> ESTABLISHED: nhận SYN+ACK, gửi ACK
+    SYN_RCVD --> ESTABLISHED: nhận ACK cuối
+    ESTABLISHED --> [*]: close()<br/>SYN/FIN 4-way riêng

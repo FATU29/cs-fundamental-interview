@@ -1,0 +1,7 @@
+flowchart LR
+  subgraph V4["IPv4 header (20-60 B)"]
+    V4H["Version 4 bit | IHL 4 bit | ToS 8 bit<br/>Total Length 16 bit<br/>ID 16 bit | Flags 3 bit | Frag Offset 13 bit<br/>TTL 8 bit | Protocol 8 bit | Checksum 16 bit<br/>src 32 bit | dst 32 bit<br/>Options (biến đổi, 0-40 B)"]
+  end
+  subgraph V6["IPv6 header (luôn 40 B)"]
+    V6H["Version 4 bit | Traffic Class 8 bit | Flow Label 20 bit<br/>Payload Length 16 bit<br/>Next Header 8 bit | Hop Limit 8 bit<br/>src 128 bit | dst 128 bit"]
+  end

@@ -1,0 +1,364 @@
+# What is an interrupt and how does the OS handle it?
+
+> Interrupt là tín hiệu phần cứng (IRQ line) hoặc phần mềm (int n, syscall) báo CPU có sự kiện cần xử lý. CPU lưu context, nhảy tới interrupt handler trong kernel, xử lý xong trả về code đang chạy. Linux dùng interrupt descriptor table (IDT) cho x86-64, vector table cho AArch64; handler có thể chia thành top-half (IRQ, tối thiểu) và bottom-half (tasklet, softirq, workqueue) để giảm thời gian tắt IRQ.
+
+Chủ đề: Operating Systems · Ngày: 2026-10-16
+
+## 1. Là gì
+
+Interrupt là sự kiện bất đồng bộ khiến CPU tạm dừng code đang chạy để xử lý việc khác. Có hai loại: hardware interrupt (IRQ từ NIC, disk controller, timer, keyboard, mouse) và software interrupt (lệnh `int n` từ user mode, hoặc `INT 0x80` cũ, hoặc trap exception như page fault, divide by zero). System call là một dạng software interrupt.
+
+Khi CPU nhận interrupt, nó lưu trạng thái hiện tại (RIP, thanh ghi, cờ) vào stack hoặc kernel structure, tra bảng vector (IDT trên x86-64, vector table trên AArch64) để tìm handler address, rồi nhảy tới handler. Handler chạy với IRQ line tương ứng bị tắt (mask), để tránh re-entry. Sau khi handler chạy xong, CPU khôi phục trạng thái và tiếp tục code.
+
+Top-half (IRQ handler) chỉ xử lý phần tối thiểu (đọc thanh ghi thiết bị, đánh dấu có dữ liệu), trả về nhanh. Bottom-half (tasklet, softirq, workqueue) xử lý phần nặng (xử lý gói tin, ghi disk) ở ngữ cảnh có thể sleep. Chia như vậy để thời gian tắt IRQ (IRQ disabled time) ngắn nhất có thể, tránh mất sự kiện từ thiết bị.
+
+```mermaid
+flowchart LR
+    HW["Hardware<br/>(NIC, disk, timer)"] -->|"IRQ line"| P["PIC / IOAPIC / MSI"]
+    P -->|"vector number"| C["CPU"]
+    C -->|"lookup IDT"| H["IRQ handler<br/>(top-half)"]
+    H -->|"deferred work"| B["Bottom-half<br/>(tasklet / softirq / workqueue)"]
+    H -->|"ack IRQ"| P
+    H -->|"iret"| C
+```
+
+*Sơ đồ vị trí: phần cứng gửi IRQ tới PIC/IOAPIC/MSI, controller gửi vector tới CPU, CPU tra IDT và gọi handler. Handler xử lý tối thiểu rồi ack cho controller, deferred work xử lý sau.*
+
+### Trả lời 30 giây
+
+"Interrupt là tín hiệu bất đồng bộ từ phần cứng (NIC, disk, timer) hoặc phần mềm (syscall, page fault) báo CPU có việc cần xử lý. CPU lưu context, tra IDT (x86-64) hoặc vector table (AArch64) để tìm handler, nhảy tới handler. Handler chia hai phần: top-half xử lý tối thiểu trong IRQ context (không được sleep), bottom-half (softirq, tasklet, workqueue) xử lý nặng sau, có thể sleep. IRQ được mask trong khi handler chạy để tránh re-entry. Mỗi IRQ tốn microsecond để acknowledge. Linux dùng MSI/MSI-X cho NIC hiện đại thay PIC cũ. Sai lầm thường gặp: cho handler sleep hoặc làm việc nặng trong IRQ context, dẫn tới mất IRQ và treo hệ thống."
+
+## 2. Cơ chế cốt lõi
+
+### Bước 1. Phần cứng gửi IRQ
+
+1. Thiết bị (NIC, disk, USB, timer) ghi một tín hiệu vào IRQ line. Truyền thống: PIC 8259A có 16 IRQ line nối vào CPU. Hiện đại: IOAPIC (x86) hoặc GIC (ARM) cho phép routing linh hoạt tới nhiều core. nâng cao hơn: thiết bị PCIe ghi message MSI (Message Signaled Interrupt) thẳng vào RAM thay vì dùng IRQ line vật lý.
+2. IRQ controller ưu tiên hoá (priority), gửi vector number tới CPU core đang chạy. Nếu CPU đang xử lý IRQ khác và IRQ mới có priority cao hơn, controller kéo INTR hoặc dùng nested interrupt (cần cấu hình).
+3. CPU acknowledge IRQ, bắt đầu lưu context: RIP, RFLAGS, CS, SS vào stack hiện tại (kernel stack nếu đang ở kernel, user stack nếu trap từ user).
+
+### Bước 2. CPU tra IDT và gọi handler
+
+1. CPU tra Interrupt Descriptor Table (IDT) hoặc vector table theo vector number. Mỗi entry chứa handler address, segment selector, cờ (present, DPL cho trap gate).
+2. CPU chuyển sang kernel mode (ring 0/EL1), nạp kernel stack (nếu trap từ user), nạp handler address.
+3. Handler chạy với IRQ vector tương ứng bị mask (đối với PIC) hoặc priority thấp hơn (IOAPIC). Các IRQ cùng hoặc thấp hơn bị chặn tới khi handler ack xong.
+
+### Bước 3. Top-half xử lý tối thiểu
+
+1. Đọc thanh ghi thiết bị để xác nhận dữ liệu (NIC: read descriptor ring, copy packet metadata; disk: đọc completion queue).
+2. Đẩy công việc nặng vào bottom-half: `tasklet_schedule`, `raise_softirq(NET_RX_SOFTIRQ)`, hoặc `queue_work`.
+3. Ghi EOI (End Of Interrupt) cho PIC/IOAPIC, IRQ line mở lại.
+4. Trả về CPU bằng `iret` (x86-64) hoặc `eret` (AArch64). CPU khôi phục context từ stack.
+
+### Bước 4. Bottom-half xử lý công việc nặng
+
+```mermaid
+stateDiagram-v2
+    [*] --> Running: code user / kernel
+    Running --> IRQEntry: phần cứng raise IRQ
+    IRQEntry --> TopHalf: tra IDT, gọi handler
+    TopHalf --> BottomHalf: schedule softirq / tasklet / workqueue
+    TopHalf --> Running: iret, IRQ re-enabled
+    BottomHalf --> Running: xử lý packet, schedule thread khác
+    Running --> IRQEntry: IRQ tiếp theo
+```
+
+*Vòng đời xử lý interrupt: từ IRQ tới top-half (IRQ context, không sleep), xuống bottom-half (process context, sleep được), rồi trở về code đang chạy.*
+
+### Bước 5. Các loại bottom-half trên Linux
+
+- **Softirq**: chạy trong softirq context, không được sleep, dùng cho network RX/TX (NET_RX_SOFTIRQ, NET_TX_SOFTIRQ), block I/O completion (BLOCK_SOFTIRQ), scheduler (SCHED_SOFTIRQ), timer (TIMER_SOFTIRQ). Chạy ngay khi ra khỏi IRQ context (ksoftirqd chạy nếu quá tải).
+- **Tasklet**: wrapper trên softirq, dynamic, dùng cho driver. Mỗi tasklet chỉ chạy trên một CPU tại một thời điểm.
+- **Workqueue**: chạy trong process context (kworker/N), được sleep, thường xuyên gặp trong driver để làm việc cần kmalloc hoặc mutex. `alloc_workqueue` tạo queue riêng.
+- **Threaded IRQ** (Linux 2.6.30+): handler chạy hẳn trong thread IRQ/N, process context. Driver gọi `request_threaded_irq` cho thiết bị không cần latency cực thấp. Tránh phải chia top/bottom-half.
+
+### Bước 6. Mức ưu tiên và nesting
+
+- **PIC cũ**: IRQ cùng priority cao nhất, không nested; cấu hình kém.
+- **IOAPIC**: cho phép priority cố định trên mỗi IRQ line, có thể gửi tới CPU cụ thể.
+- **MSI/MSI-X**: ghi message vào RAM, vector nằm trong message; priority linh hoạt, có thể gửi tới nhiều CPU (multicast).
+- **Nested interrupt**: một IRQ có thể preempt IRQ khác nếu priority cao hơn. X86 mặc định không cho phép (mask toàn bộ IRQ khi xử lý); một số OS cho phép nhưng cẩn thận stack overflow.
+
+### Bước 7. Cấu trúc IDT entry
+
+| Offset | Field | Ý nghĩa |
+|---|---|---|
+| 0-1 | Offset low (bits 0-15) | Handler address thấp |
+| 2-3 | Selector | Code segment selector (kernel CS) |
+| 4 | IST | Interrupt Stack Table (x86-64) |
+| 5 | Type/Attr | Gate type: interrupt gate (cờ IF=0) hoặc trap gate |
+| 6-7 | Offset mid (bits 16-31) | Handler address giữa |
+| 8-11 | Offset high (bits 32-63) | Handler address cao |
+| 12-15 | Reserved | 0 |
+
+Mỗi IDT entry 16 byte, 256 entry (vector 0-255). Vector 0-31 là exception (divide, debug, NMI, page fault), 32-255 là IRQ.
+
+### Quan sát
+
+```bash
+# Linux: đếm số IRQ mỗi CPU
+cat /proc/interrupts
+#            CPU0       CPU1
+#  0:    1234567          0   IO-APIC   2-edge      timer
+#  9:          0          0   IO-APIC   9-fasteoi   acpi
+#  42:     100000      50000   PCI-MSI 524288-edge   nvme0q0
+
+# Linux: xem softirq stats
+cat /proc/softirqs
+#            CPU0       CPU1
+# HI:          0          0
+# TIMER:  500000     400000
+# NET_RX: 200000     150000
+
+# Linux: xem CPU đang chạy ksoftirqd
+ps -eLo pid,tid,cmd | grep ksoftirqd
+
+# Linux: dump IDT entry 0x80 (legacy syscall)
+# (cần kernel debug build hoặc xem trong System.map)
+```
+
+### Ví dụ chạy từng bước
+
+Kịch bản: NIC 10 Gbps nhận một packet 64 byte. Mục tiêu: thấy IRQ đi từ wire tới softirq, biết vì sao top-half chỉ ack và đẩy bottom-half, và thấy vì sao mất IRQ tạo log "nobody cared".
+
+Giả định: NIC dùng MSI-X (một vector riêng cho queue), IRQ 42 đã pin tới CPU 2 qua `/proc/irq/42/smp_affinity_list`, kernel bật NAPI. Thread user đang `epoll_wait` trên socket. Mỗi bước dùng số liệu minh họa đã tính lại bằng script; output lệnh chưa chạy thật ghi "output minh họa, chưa chạy".
+
+| Bước | Thời gian | Ai làm gì | Vì sao | Trạng thái |
+|---|---|---|---|---|
+| 0 | t0 | Wire: NIC ghi 64 byte vào DMA ring buffer. NIC kéo PCIe MSI-X vector 42 (pin tới CPU 2). | DMA copy packet từ wire vào RAM; vector trong message routing thẳng tới core, không qua IOAPIC. | Ring có 1 packet; INTR pin ở CPU 2 |
+| 1 | t0 + ~1.4 µs | CPU 2 tra IDT vector 42 → `irq_handler[42]`. Top-half driver gọi `napi_schedule()`, disable IRQ 42, đánh dấu NAPI pending. | IDT lookup ~30 cycles; IRQ context không được sleep nên dời việc nặng xuống softirq. | ring 0; IRQ 42 masked |
+| 2 | t0 + ~1.5 µs | Top-half ghi EOI cho IOAPIC, `iret`. | IRQ line mở lại; latency top-half mục tiêu < 5 µs. | ring 3; IRQ có thể tới lại |
+| 3 | t0 + ~2 µs | Softirq `NET_RX` chạy ngay khi ra khỏi IRQ (hoặc `ksoftirqd/2` nếu backlog). Poll `napi->poll()` đọc ring batch ~64 packet, xử lý rồi `napi_complete()`. | Poll batch giảm IRQ overhead 10-100x với packet nhỏ; IRQ re-enabled khi xong. | packets processed; IRQ 42 re-enabled |
+| 4 | t0 + ~3 µs | `netif_rx` đẩy packet lên TCP/IP stack, wake user thread đang `epoll_wait`. | User thread poll() trả về, đọc socket. | packet tới user space |
+
+Trạng thái hệ thống sau burst 1 Mpps (đã tính lại bằng script, 1 Mpps × 64 B = 512 Mbps; còn ~9.5 Gbps headroom trên link 10 Gbps):
+- `cat /proc/interrupts` cho thấy `42:` tăng ~1.000.001 lần (một IRQ + softirq xử lý batch).
+- `cat /proc/softirqs` cho `NET_RX: ~1.000.000` trên CPU 2.
+- `top` cho `ksoftirqd/2` < 5% CPU nếu batch xử lý kịp.
+
+Biến thể lỗi: driver bug, top-half không gọi `napi_schedule()` và quên ack IRQ. Sau vài nghìn packet, NIC ring đầy, IRQ raise liên tục nhưng không ai handle. Kernel in `irq 42: nobody cared` trong `dmesg`. Kiểm tra: `dmesg | grep "nobody cared"`, xác nhận driver thiếu ack. Khắc phục: update driver hoặc revert patch; workaround tạm `echo masked > /sys/kernel/irq/42/action` để ngăn storm.
+
+Biến thể quá tải: nếu traffic lên 5 Mpps và NAPI budget (`net.core.netdev_budget`, mặc định 300) nhỏ so với batch, `ksoftirqd/2` chạy 100% CPU. Thread user vẫn nhận packet nhưng latency tăng vì wakeup bị trễ. Hai cách xử lý: tăng budget (`sysctl -w net.core.netdev_budget=600`) hoặc chuyển sang busy poll/DPDK để kernel không switch.
+
+Điều rút ra: top-half cố gắng càng ngắn càng tốt vì IRQ context không được sleep; phần nặng đi qua softirq/workqueue để kernel xử lý có thể schedule. Nối sang câu 2 và câu 4 ở 3A để giải thích vì sao "workqueue chạy ở IRQ context" là sai.
+
+## 3. Câu hỏi phỏng vấn
+
+### 3A. Câu hỏi đào sâu
+
+<details class="qa">
+<summary>Câu 1. IRQ và software interrupt khác nhau thế nào?</summary>
+
+**Trả lời ngắn:** IRQ (hardware interrupt) là tín hiệu vật lý từ thiết bị qua IRQ line tới PIC/IOAPIC/MSI tới CPU. Software interrupt là lệnh CPU (`int n`, `syscall`, `int3` breakpoint, page fault exception). Cả hai đều tra IDT/vector table, nhưng IRQ async với code đang chạy, software interrupt xảy ra do code chủ động hoặc fault.
+
+**Đào sâu:**
+- IRQ vector 32-255 (x86-64), bắt nguồn từ thiết bị. Kernel đăng ký handler qua `request_irq` hoặc `request_threaded_irq`.
+- Software interrupt: `int 0x80` (legacy), `int3` (breakpoint, debugger), `into` (overflow trap), `syscall` (instruction khác IDT).
+- Page fault không phải IRQ mà là exception — vẫn qua IDT nhưng kernel phải fix-up hoặc gửi SIGSEGV.
+- NMI (Non-Maskable Interrupt) là vector đặc biệt, không thể mask; dùng cho watchdog, critical hardware error.
+- IRQ có thể shared: nhiều driver `request_irq` cùng line, handler phải kiểm tra thanh ghi thiết bị để xác nhận IRQ của mình.
+
+**Bẫy:** "IRQ và syscall là cùng cơ chế." Sai — cả hai đều qua IDT, nhưng IRQ có mask bit, syscall không. IRQ xảy ra bất đồng bộ, syscall do code chủ động.
+
+**Follow-up:** NMI xử lý thế nào? NMI có vector riêng (2 trên x86-64), handler chạy với mask toàn bộ IRQ, không thể preempt. Dùng cho watchdog, hardware failure. Linux có NMI watchdog kiểm tra CPU stall.
+</details>
+
+<details class="qa">
+<summary>Câu 2. Tại sao phải chia top-half và bottom-half?</summary>
+
+**Trả lời ngắn:** Trong IRQ context, IRQ khác cùng priority bị mask, kernel không được sleep. Nếu handler làm việc nặng, IRQ mất (thiết bị không nhận ack, tràn buffer) và latency hệ thống tăng. Chia top-half (tối thiểu, đọc thanh ghi, schedule bottom-half) và bottom-half (xử lý nặng, có thể sleep) giữ IRQ disabled time ngắn.
+
+**Đào sâu:**
+- Top-half: chạy với IRQ tương ứng mask. Phải kết thúc nhanh (microsecond). Làm gì: đọc device register, ack IRQ, schedule bottom-half. Không được: `kmalloc(GFP_KERNEL)` (sleep), mutex_lock (sleep), copy_to_user.
+- Bottom-half softirq: chạy khi ra khỏi IRQ, vẫn không được sleep. `ksoftirqd` chạy nếu softirq pending quá nhiều.
+- Bottom-half tasklet: trên softirq, dễ dùng cho driver, không sleep.
+- Bottom-half workqueue: chạy trong process context, được sleep, dùng cho việc cần mutex, kmalloc.
+- Threaded IRQ: handler chạy thẳng trong IRQ thread, không cần top-half. Linux khuyến nghị cho driver mới.
+- NIC high-throughput: thường dùng NAPI (New API) — disable IRQ, poll ring buffer, re-enable IRQ khi xong.
+
+**Bẫy:** "Workqueue chạy ở IRQ context." Sai — workqueue chạy trong process context (kworker), được sleep.
+
+**Follow-up:** Đo IRQ disabled time thế nào? `perf stat -e irq:irq_handler_entry,irq:irq_handler_exit` đếm thời gian. Tracer `function_graph` hoặc `irqsoff` trong ftrace cho thấy đoạn nào tắt IRQ lâu nhất.
+</details>
+
+<details class="qa">
+<summary>Câu 3. MSI và MSI-X khác gì với IRQ line cũ?</summary>
+
+**Trả lời ngắn:** IRQ line cũ (PIC 8259) có 16 line vật lý chia sẻ giữa nhiều thiết bị, dễ conflict. MSI (Message Signaled Interrupt) cho phép thiết bị PCIe ghi message 4 byte vào RAM, vector và CPU đích trong message. MSI-X mở rộng tới 2048 vector cho một thiết bị, mỗi vector mapping riêng.
+
+**Đào sâu:**
+- MSI cơ bản (PCI 2.2): tối đa 32 vector cho một thiết bị, mỗi vector viết tới một địa chỉ. Không share IRQ line.
+- MSI-X (PCI 3.0): tối đa 2048 vector, lưu trong bảng trong RAM thiết bị. Driver đăng ký handler riêng cho mỗi vector. Rất tốt cho NIC multi-queue (mỗi queue một vector).
+- Ưu điểm MSI: không share IRQ (mỗi vector riêng), có thể gửi tới CPU cụ thể (affinity), latency thấp hơn vì không qua PIC.
+- Nhược: thiết bị cũ không hỗ trợ; một số platform giới hạn số vector.
+- Linux: `cat /proc/interrupts` hiển thị `PCI-MSI` hoặc `PCI-MSI-X` thay `IO-APIC`.
+
+**Bẫy:** "MSI nhanh hơn IRQ line cũ vì không qua PIC." Đúng một phần — overhead thấp hơn, nhưng bản chất vẫn là CPU phải tra IDT và chạy handler. Bottleneck thường ở handler và bottom-half, không phải cơ chế signaling.
+
+**Follow-up:** IRQ affinity set thế nào? `echo "mask" > /proc/irq/N/smp_affinity` để pin IRQ tới CPU. Linux 3.x có `managed_irq` tự động distribute; `irqbalance` daemon cũng phân phối.
+</details>
+
+<details class="qa">
+<summary>Câu 4. NAPI trong network driver là gì và vì sao cần?</summary>
+
+**Trả lời ngắn:** NAPI (New API) cho phép NIC driver tắt IRQ sau khi nhận packet đầu tiên, chuyển sang poll ring buffer trong softirq để xử lý batch. Tắt IRQ trong lúc có traffic nặng giảm overhead IRQ và tăng throughput.
+
+**Đào sâu:**
+- Trước NAPI: mỗi packet một IRQ, handler xử lý một packet rồi exit. NIC 10 Gbps với packet 64 byte có thể tạo hàng triệu IRQ/giây — handler overhead giết throughput.
+- NAPI flow: packet tới → IRQ → top-half schedule `napi_schedule` → IRQ tắt → softirq NET_RX poll ring buffer (xử lý batch ~64-256 packet) → hết packet → IRQ bật lại.
+- Driver implement `napi->poll()` đọc ring buffer tới khi trống.
+- Hiệu quả: giảm IRQ overhead 10-100x với packet nhỏ, tăng pps (packet per second).
+- Đánh đổi: latency tăng nhẹ (phải đợi poll), nhưng batch processing tốt hơn.
+- Linux 5.x: NIC driver mới mặc định dùng NAPI; một số NIC multi-queue có NAPI instance riêng cho mỗi queue.
+
+**Bẫy:** "NAPI poll chạy ở user context." Sai — poll chạy trong softirq context, không được sleep.
+
+**Follow-up:** Busy poll (`SO_BUSY_POLL`) khác NAPI thế nào? Busy poll ở user context, thread đợi packet đợi busy spin trên ring buffer; latency cực thấy (~10 µs), tốn CPU. Trade-off giữa latency và CPU.
+</details>
+
+<details class="qa">
+<summary>Câu 5. Affinity, IRQ balancing và throughput ảnh hưởng thế nào?</summary>
+
+**Trả lời ngắn:** IRQ affinity cho phép pin IRQ tới một hoặc vài CPU. NIC multi-queue thường pin mỗi queue tới một CPU; cache locality tốt, throughput tăng. `irqbalance` daemon tự động phân phối IRQ.
+
+**Đào sâu:**
+- Đặt affinity: `echo 1 > /proc/irq/42/smp_affinity` (CPU 1). Hoặc `/proc/irq/42/smp_affinity_list`.
+- Ảnh hưởng cache: IRQ handler và softirq chạy trên CPU đó; nếu user thread xử lý packet cũng chạy CPU đó, cache locality tốt. Nếu phải RPS (Receive Packet Steering) tới CPU khác, tốn inter-processor interrupt.
+- RPS/RFS/XPS: kernel feature mở rộng. RPS phân phối packet từ một queue tới nhiều CPU. RFS (Receive Flow Steering) gói packet cùng flow tới CPU user thread đang đợi.
+- `irqbalance`: chạy nền, scan `/proc/interrupts`, đảm bảo IRQ phân phối đều giữa các CPU. Tắt nếu manual tốt hơn.
+- VNUMERIC rack khác NUMA: IRQ pin tới CPU thuộc cùng NUMA node với NIC; cross-socket QPI tốn.
+
+**Bẫy:** "Pin mọi IRQ tới CPU 0." Sai — single core bottleneck. Pin theo workload: NIC queue tới core cùng NUMA, disk IRQ tới core riêng.
+
+**Follow-up:** NUMA ảnh hưởng IRQ thế nào? NIC trên NUMA node 0 mà IRQ pin tới CPU NUMA node 1: packet phải đi qua inter-connect (~100 ns extra), giảm throughput. Linux tự detect gợi ý trong `/proc/irq/N/node`.
+</details>
+
+<details class="qa">
+<summary>Câu 6 (Debug). Hệ thống có dấu hiệu "lost IRQ" hoặc latency spike khi chạy heavy I/O. Cách điều tra?</summary>
+
+**Trả lời ngắn:** Lost IRQ: thiết bị gửi IRQ nhưng CPU không nhận (mask quá lâu, handler crash). Latency spike: handler chạy quá lâu, softirq backlog lớn. Trình tự: kiểm tra `/proc/interrupts` và `/proc/softirqs`, xem kernel log cho "irq N: nobody cared", dùng `perf` và `ftrace` đo IRQ off time.
+
+**Đào sâu:**
+- Bước 1: `cat /proc/interrupts` xem IRQ nào tăng nhiều. "Lost" count tăng → handler không ack kịp.
+- Bước 2: `dmesg | grep "irq.*nobody cared"` — kernel in khi IRQ mà không có handler ack.
+- Bước 3: `perf stat -e irq:irq_handler_entry,irq:irq_handler_exit sleep 10` để đo thời gian handler trung bình.
+- Bước 4: `perf record -e irq_vectors:* -g -a sleep 10` để profile IRQ hot path.
+- Bước 5: ftrace `tracer=irqsoff` — trace đoạn code tắt IRQ lâu nhất.
+- Bước 6: Nếu liên quan NIC, kiểm tra NAPI poll budget (`net.core.netdev_budget`), có thể cần tăng hoặc giảm.
+- Bước 7: Kiểm tra ksoftirqd — nếu CPU cao, softirq backlog quá tải.
+
+**Bẫy:** Tăng `netdev_budget` vô tội vạ. Sai — budget quá cao giữ CPU lâu trong softirq, các IRQ khác chậm.
+
+**Follow-up:** Coalescing IRQ có ảnh hưởng tới lost IRQ không? NIC coalesce nhiều packet thành một IRQ — giảm IRQ count, giảm overhead; nhưng latency tăng. Trade-off throughput vs latency.
+</details>
+
+<details class="qa">
+<summary>Câu 7 (Thiết kế). Thiết kế xử lý gói tin 10 Gbps với latency p99 < 50 µs. Cơ chế nào?</summary>
+
+**Trả lời ngắn:** NIC multi-queue (RSS hoặc MSI-X), NAPI, IRQ pin tới core riêng, busy poll hoặc DPDK để giảm có. Tránh softirq backlog bằng polling.
+
+**Đào sâu:**
+- Yêu cầu: 10 Gbps ~14.8 Mpps (packet 64 byte), latency p99 < 50 µs. Default kernel softirq có thể đạt ~1-3 Mpps, latency p99 vài trăm µs — không đủ.
+- NIC multi-queue: NIC chia flow (hash 5-tuple) vào queue, mỗi queue một MSI-X vector, pin tới core riêng. Core xử lý queue đó hoàn toàn, không share.
+- NAPI: tắt IRQ khi đang có packet, poll ring buffer cho batch; ngược lại IRQ được bật.
+- Busy poll: `setsockopt(SO_BUSY_POLL, 50)` — thread đợi packet busy spin 50 µs trên ring buffer trước khi sleep. Latency giảm xuống ~10 µs nhưng tốn 100% CPU cho mỗi core.
+- DPDK: kernel-bypass hoàn toàn, user-space driver, ring buffer chia sẻ user/kernel; poll busy ở user. Throughput 10-40 Gbps trên một core, latency < 10 µs. Đánh đổi: cần huge page, kernel không nhìn thấy packet (cần ARPing khác), deployment phức tạp.
+- Trade-off: busy poll/DPDK tốn CPU nhưng latency thấp; default kernel tiết kiệm CPU nhưng latency cao.
+
+**Bẫy:** Chỉ tăng số core — không giúp nếu IRQ cùng core, softirq backlog vẫn tồn tại.
+
+**Follow-up:** DPDK vs netmap so sánh thế nào? Cả hai đều kernel-bypass, ring buffer user; netmap API thân thiện hơn cho BSD, DPDK thân thiện Linux. Throughput tương đương.
+</details>
+
+### 3B. Câu hỏi phỏng vấn liên quan
+
+<details class="qa">
+<summary>Câu 8. IDT và GDT khác nhau thế nào?</summary>
+
+**Trả lời:** GDT (Global Descriptor Table) chứa segment descriptor cho code/data segment, TSS (Task State Segment). IDT (Interrupt Descriptor Table) chứa interrupt gate, trap gate, task gate cho mỗi vector. Cả hai load qua `lgdt`/`lidt`. Trên x86-64 long mode, segmentation phẳng nhưng IDT vẫn cần để xử lý exception và IRQ.
+</details>
+
+<details class="qa">
+<summary>Câu 9. Tại sao interrupt handler không được sleep?</summary>
+
+**Trả lời:** Handler chạy trong IRQ context, kernel stack hiện tại có thể không phải của một process. Sleep nghĩa là schedule, nhưng scheduler dùng `current` task; nếu `current` là idle task hoặc thread không hợp lệ, scheduler crash. Hơn nữa, IRQ đang tắt; sleep tới khi wakeup làm hệ thống treo. Vì vậy handler không được gọi mutex, kmalloc(GFP_KERNEL), schedule.
+</details>
+
+<details class="qa">
+<summary>Câu 10. NMI dùng khi nào?</summary>
+
+**Trả lời:** NMI (Non-Maskable Interrupt) cho sự kiện critical không thể bỏ qua: hardware failure, watchdog timeout, memory parity error. Linux watchdog NMI phát hiện CPU stall: nếu CPU không tick trong N giây, NMI raise, kernel in backtrace. Kernel debugger (KDB) cũng dùng NMI để vào debug.
+</details>
+
+<details class="qa">
+<summary>Câu 11. ISR và IST khác nhau thế nào (x86-64)?</summary>
+
+**Trả lời:** ISR là handler thông thường, dùng kernel stack của thread hiện tại. IST (Interrupt Stack Table) là cơ chế x86-64: cho vector quan trọng (NMI, double fault, MCE), CPU dùng stack riêng từ TSS. Tránh stack overflow nếu handler lỗi gây exception khác (double fault). Kernel set IST=1 cho #DF, IST=2 cho NMI, IST=3 cho #DB (debug).
+</details>
+
+<details class="qa">
+<summary>Câu 12. True or false: "Spurious interrupt là bug thiết bị, kernel không làm gì được."</summary>
+
+**Trả lời:** Sai. Spurious interrupt là IRQ raise nhưng thiết bị không thực sự có data (line noise, race). Kernel handler vẫn chạy, đọc thanh ghi, thấy không có data, đơn giản ack và trả về. Kernel ghi "spurious IRQ" vào log. Nếu xảy ra nhiều, nghi ngờ hardware (bad cable, EMI). Kernel có thể mask IRQ đó tạm.
+</details>
+
+<details class="qa">
+<summary>Câu 13. SMP và IRQ affinity: pin IRQ tới một CPU có ý nghĩa gì?</summary>
+
+**Trả lời:** Pin IRQ tới một CPU giữ cache locality tốt cho handler và softirq xử lý liên quan. Tránh cache miss khi IRQ nhảy qua CPU khác. Đánh đổi: nếu CPU đó bận, IRQ phải đợi; throughput giảm. Production thường pin NIC queue tới core riêng, disk IRQ tới core khác.
+</details>
+
+<details class="qa">
+<summary>Câu 14. ISR vector 0-31 trên x86-64 là gì?</summary>
+
+**Trả lời:** Vector 0-31 là reserved exception: 0 divide, 1 debug, 2 NMI, 3 breakpoint, 4 overflow, 5 bound, 6 invalid opcode, 7 device not available, 8 double fault, 9 coprocessor, 10 invalid TSS, 11 segment not present, 12 stack fault, 13 general protection, 14 page fault, 15 reserved, 16 x87 FP, 17 alignment check, 18 machine check, 19 SIMD FP, 20-31 reserved. Kernel xử lý đặc biệt cho mỗi loại (ví dụ page fault).
+</details>
+
+<details class="qa">
+<summary>Câu 15. Làm sao xem handler của một IRQ cụ thể?</summary>
+
+**Trả lời:** `cat /proc/irq/N/spurious` (nếu có). Kernel module expose handler qua `/sys/kernel/irq/N/` (chip name, handler type). `ls /sys/kernel/irq/` xem IRQ đang active. Debugfs `trace/irq` cho trace. Hoặc grep `/proc/kallsyms` tìm symbol IRQ handler.
+</details>
+
+## 4. Đánh đổi và sự cố production
+
+IRQ cũ (PIC 8259) giới hạn 16 line, share nhiều thiết bị, priority không linh hoạt. IOAPIC mở rộng tới 24 line với priority và routing tới CPU cụ thể. MSI đẩy message qua RAM, không cần line vật lý, vector linh hoạt. MSI-X mở rộng tới 2048 vector cho thiết bị cao cấp. Chọn cơ chế nào: thiết bị mới tân tiến nên dùng MSI-X, đặc biệt NIC multi-queue; thiết bị cũ vẫn phải dùng IOAPIC; 8259 hiếm gặp trên server hiện đại. Về latency: kernel default softirq tiết kiệm CPU nhưng latency p99 vài trăm µs; busy poll latency < 50 µs nhưng tốn 100% CPU; DPDK tốt nhất cho 10 Gbps nhưng cần huge page và code path riêng. Đừng quên: NIC coalescing giảm IRQ count nhưng tăng latency từng IRQ.
+
+### So sánh cơ chế IRQ signaling
+
+| Tiêu chí | 8259 PIC | IOAPIC | MSI | MSI-X |
+|---|---|---|---|---|
+| Số line/vector | 16 | 24 | 32 | 2048 |
+| Routing tới CPU | Cố định | Linh hoạt | Linh hoạt | Linh hoạt |
+| Per-vector handler | Không | Không | Có | Có |
+| Overhead | Cao (line + PIC) | Thấp | Thấp nhất | Thấp nhất |
+| Phù hợp | Legacy | Mainboard | NIC, storage | NIC multi-queue |
+
+### Năm failure mode
+
+| Triệu chứng | Nguyên nhân gốc | Cách kiểm tra | Cách sửa |
+|---|---|---|---|
+| "irq N: nobody cared" | Driver không ack, IRQ storm | `dmesg`, `/proc/interrupts` | Cập nhật driver, mask IRQ |
+| Latency spike khi heavy I/O | Handler chạy lâu, softirq backlog | `perf stat`, ftrace irqsoff | NAPI, threaded IRQ, busy poll |
+| Packet loss NIC | Ring buffer overflow, IRQ không kịp | `ethtool -S`, `drops` | Tăng ring size, multi-queue |
+| ksoftirqd 100% CPU | Softirq backlog quá tải | `top`, `/proc/softirqs` | RPS, busy poll, hoặc thêm core |
+
+Hai bài học: (1) latency tail thường do softirq backlog hơn là kernel overhead; (2) IRQ balancing cần test thực tế, default `irqbalance` không phải lúc nào cũng tối ưu. Xem [context-switching](context-switching.md) cho chi phí khi IRQ trả về code, và [system-call-and-kernel-mode](system-call-and-kernel-mode.md) cho software interrupt.
+
+## 5. Cheat sheet
+
+| Chủ đề | Con số / quy tắc cần nhớ |
+|---|---|
+| Top-half vs bottom-half | Top: IRQ context, không sleep; Bottom: process context, sleep OK |
+| Softirq chính Linux | NET_RX, NET_TX, BLOCK, SCHED, TIMER, HRTIMER, RCU |
+| MSI-X vector | Tối đa 2048 |
+| IDT vector | 256 (0-31 exception, 32-255 IRQ) |
+| NAPI budget | `net.core.netdev_budget` mặc định 300 |
+| Latency default softirq | p99 vài trăm µs |
+| Latency busy poll | p99 < 50 µs, tốn 100% CPU |
+| Latency DPDK | p99 < 10 µs, kernel-bypass |
+| IRQBALANCE_BANNED_CPUS | Set trong `/etc/default/irqbalance` |
+
+**Học tiếp:**
+- [system-call-and-kernel-mode](system-call-and-kernel-mode.md) — software interrupt (syscall)
+- [context-switching](context-switching.md) — chi phí khi trở về code
+- [process-vs-thread](process-vs-thread.md) — đơn vị CPU schedule sau IRQ

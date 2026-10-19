@@ -1,0 +1,15 @@
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+
+    Note over C,S: HTTP/1.1: one request in flight per connection
+    C->>S: GET /app.js
+    S-->>C: 200 app.js (slow, 400ms)
+    C->>S: GET /logo.png (waits for app.js)
+    S-->>C: 200 logo.png
+
+    Note over C,S: HTTP/2: one TCP connection, many streams
+    C->>S: HEADERS stream 1 GET /app.js
+    C->>S: HEADERS stream 3 GET /logo.png
+    S-->>C: DATA stream 3 logo.png
+    S-->>C: DATA stream 1 app.js (chunks interleaved)

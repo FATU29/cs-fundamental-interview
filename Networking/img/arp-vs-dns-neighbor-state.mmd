@@ -1,0 +1,14 @@
+stateDiagram-v2
+  [*] --> INCOMPLETE: ARP Request gửi đi
+  INCOMPLETE --> REACHABLE: nhận ARP Reply hợp lệ
+  INCOMPLETE --> FAILED: hết retransmit (mặc định 3 lần)
+  REACHABLE --> STALE: hết base_reachable_time (~30s)
+  STALE --> DELAY: có gói gửi tới MAC đó
+  DELAY --> PROBE: hết delay_first_probe_time (~5s),<br/>không có xác nhận L2
+  PROBE --> REACHABLE: nhận xác nhận (ARP/ndp upper-layer)
+  PROBE --> PROBE: gửi unicast NS,<br/>chưa có xác nhận,<br/>tối đa ucast_probes (mặc định 3)
+  PROBE --> FAILED: hết probe<br/>(entry bị xóa)
+  REACHABLE --> STALE: gói đi tới MAC nhưng<br/>không có xác nhận L2
+  FAILED --> [*]
+  STALE --> REACHABLE: gửi gói và nhận<br/>xác nhận L2
+  STALE --> DELAY: có gói gửi tới MAC đó

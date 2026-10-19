@@ -1,0 +1,13 @@
+flowchart TB
+    App["Application<br/>HTTP, gRPC, SMTP"]
+    TLS["TLS record layer<br/>AEAD: AES-GCM / ChaCha20-Poly1305"]
+    TCP["TCP<br/>stream tin cay, in-order"]
+    IP["IP / UDP (QUIC)"]
+    App --> TLS --> TCP --> IP
+
+    Client["Client<br/>(browser, mobile, SDK)"]
+    Server["Server / mTLS peer"]
+    Client -->|handshake 1 RTT<br/>TLS 1.3| Server
+
+    CA["CA / trust store<br/>(xac thuc cert, CT log)"]
+    Server -.->|cert chain<br/>ky boi CA| CA

@@ -1,0 +1,19 @@
+sequenceDiagram
+  participant A as Host A<br/>10.0.0.1<br/>MAC aa:aa:aa:aa:aa:01
+  participant SW as Switch<br/>(VLAN 10)
+  participant B as Host B<br/>10.0.0.7<br/>MAC bb:bb:bb:bb:bb:07
+  participant GW as Gateway<br/>10.0.0.254<br/>MAC cc:cc:cc:cc:cc:fe
+
+  Note over A: Cần gửi gói IP tới 10.0.0.99
+  A->>A: Tra bảng định tuyến:<br/>10.0.0.99 thuộc cùng subnet
+  A->>A: Tra ARP cache:<br/>IP 10.0.0.99 chưa có
+  A->>SW: ARP Request (broadcast)<br/>"who-has 10.0.0.99 tell 10.0.0.1"<br/>MAC dst = ff:ff:ff:ff:ff:ff
+  SW->>B: Forward broadcast tới mọi cổng
+  SW->>GW: Forward broadcast
+  B->>A: ARP Reply (unicast)<br/>"10.0.0.99 is-at dd:dd:dd:dd:dd:99"
+  GW->>A: ARP Reply (unicast)<br/>"10.0.0.99 is-at cc:cc:cc:cc:cc:99"<br/>(nếu GW có proxy ARP bật)
+  Note over A: Cache: 10.0.0.99 -> dd:dd:dd:dd:dd:99
+  A->>B: Frame Ethernet unicast<br/>MAC dst = dd:dd:dd:dd:dd:99<br/>payload = gói IP tới 10.0.0.99
+
+  Note over A: Sau ~30 giây entry REACHABLE -> STALE
+  Note over A: Gói mới tới cùng MAC,<br/>chuyển DELAY rồi xác nhận

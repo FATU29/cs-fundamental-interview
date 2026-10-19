@@ -1,0 +1,437 @@
+# Explain compare-and-swap (CAS).
+
+> Compare-and-swap (CAS) là instruction CPU nguyên tử đọc-kiểm-tra-ghi: so sánh giá trị bộ nhớ với giá trị kỳ vọng, nếu bằng thì ghi giá trị mới, nếu không thì không ghi và trả về giá trị hiện tại. CAS là building block của lock-free algorithm, mutex hiện đại và concurrent data structure. Bài [mutex-vs-lock](mutex-vs-lock.md) trình bày mutex Linux hiện đại dùng CAS cho fast path; bài [race-condition](race-condition.md) bàn cách ngăn race bằng CAS hoặc mutex.
+
+Chủ đề: Concurrency · Ngày: 2026-10-16
+
+## 1. Là gì
+
+CAS là một atomic primitive. Trên CPU, nó là một instruction duy nhất (`CMPXCHG` trên x86, `LDADD`/`STXR` trên ARM, `LL/SC` trên một số kiến trúc RISC), đảm bảo nguyên tử: bước đọc-kiểm-tra-ghi xảy ra như một đơn vị duy nhất với phần cứng, không bị xen giữa bởi thread khác.
+
+Theo nhóm câu hỏi gốc: "What is an atomic operation?" — thuật ngữ "atomic" trong bối cảnh CAS chỉ tính không-thể-bị-xen. Một operation atomic được thực thi như thể là duy nhất một bước, không có khoảng trống cho thread khác xen vào đọc-ghi giữa các bước con. CAS là một trong các atomic operation; các operation atomic khác gồm `fetch_add`, `fetch_or`, `exchange` (atomic swap), `load`/`store` với memory ordering cụ thể.
+
+Một operation atomic nhưng vẫn có thể thất bại là đặc tính của CAS: khi giá trị không bằng kỳ vọng, CAS không ghi và trả fail. Caller dùng cơ chế retry (compare-and-swap loop / CAS loop) để tiếp tục thử.
+
+```mermaid
+flowchart TD
+    Thread1["Thread 1"] -->|"CAS(addr, expected=A, new=B)"| HW["CPU:<br/>CMPXCHG (x86)<br/>LDXR/STXR (ARM)"]
+    Thread2["Thread 2"] -->|"CAS(addr, expected=A, new=C)"| HW
+    HW -->|"atomic compare"| Mem["Memory location<br/>= A hiện tại"]
+    Mem -->|"= A → write B<br/>return success"| Thread1
+    Mem -->|"= B (đã đổi)<br/>return fail"| Thread2
+```
+
+*Sơ đồ vị trí: hai thread cùng gọi CAS trên cùng memory address với `expected` cũ = A. CPU atomic compare thấy giá trị hiện tại = A, thread 1 thắng (CAS thành công → B). Thread 2 retry nếu cần để cập nhật từ B sang C.*
+
+### Trả lời 30 giây
+
+"Compare-and-swap là instruction CPU nguyên tử: đọc giá trị memory, so sánh với `expected`, nếu bằng thì ghi `new` và trả success; nếu không thì không ghi và trả fail. CAS là building block của lock-free data structure và fast path của mutex hiện đại (Linux futex, Java `AtomicInteger`, C++ `std::atomic`). Thuật toán CAS loop — đọc, tính, CAS, nếu fail thì thử lại — cho phép implement counter, queue, stack không cần mutex. Đánh đổi: không block nhưng có thể live-lock khi contention cực cao (thread retry liên tục); vẫn không cho tính composite — nhiều bước phải dùng CAS từng bước hoặc mutex."
+
+## 2. Cơ chế cốt lõi
+
+### Bước 1. CAS là một instruction nguyên tử trên CPU
+
+Trên x86, `CMPXCHG` (compare-and-exchange) là một instruction duy nhất thực hiện: đọc từ memory, so sánh với `EAX`, nếu bằng thì ghi giá trị mới vào memory, nếu không thì ghi giá trị hiện tại vào `EAX` và set ZF. Toàn bộ thao tác do CPU đảm bảo nguyên tử ở mức bus/cache coherency (MESI protocol). Không có cách nào thread khác đọc-ghi kẹp giữa các bước.
+
+Trên ARM/Apple Silicon (dòng A), CAS không phải một instruction duy nhất: dùng cặp `LDXR` (load exclusive) + `STXR` (store exclusive). CPU ghi nhớ address đã load exclusive; nếu không có thread khác ghi vào address đó (exclusive monitor OK), `STXR` thành công. Nếu có thread khác ghi, `STXR` fail và retry.
+
+### Bước 2. CAS trả success/fail với giá trị hiện tại
+
+API C/C++ thường trả về "value hiện tại trước khi CAS" hoặc bool:
+
+```cpp
+bool cas(int* addr, int expected, int new_val);  // trả về true nếu thành công
+```
+
+Trên thực tế nhiều trình biên dịch/hàm lib (`__atomic_compare_exchange`, `_InterlockedCompareExchange`, `_cmpxchg_unsafe`) có nhiều variant. Một số trả `bool`, một số trả old value. Caller biết success qua "old value == expected" hoặc trả flag.
+
+### Bước 3. CAS loop: retry khi fail
+
+CAS chỉ thành công nếu giá trị không bị thread khác đổi giữa lúc đọc và lúc CAS. Khi contention, CAS fail. Thuật toán chuẩn:
+
+```cpp
+void increment(std::atomic<int>& counter) {
+    int expected = counter.load();
+    while (!counter.compare_exchange_weak(expected, expected + 1)) {
+        // expected đã được cập nhật bởi compare_exchange_weak
+        // thử lại
+    }
+}
+```
+
+`compare_exchange_weak` có thể fail spurious (trên ARM mà không có exclusive monitor), `compare_exchange_strong` không. Weak phù hợp CAS loop vì sẽ retry; strong phù hợp khi cần biết fail chính xác (vd để log).
+
+### Bước 4. ABA problem
+
+ABA: thread A đọc giá trị = `A`, tính toán new = `B`. Thread B xen vào: CAS `A → X`, sau đó CAS `X → A`. Bây giờ giá trị lại là `A`. Thread A CAS `A → B` thành công, không biết giá trị đã thay đổi vòng. Nếu biến là pointer đến object, object cũ có thể đã bị giải phóng → use-after-free.
+
+ABA xảy ra khi: (a) giá trị CAS chỉ là một word; (b) môi trường có thể quay vòng giá trị. Giải pháp:
+- Thêm version counter 64-bit (hoặc pair (pointer, counter)).
+- Tagged pointer: thêm tag vào low-bit.
+- Sử dụng GC hoặc hazard pointer.
+
+### Bước 5. Memory ordering và CAS
+
+CAS thường kèm memory ordering. C++ `memory_order`:
+
+- `memory_order_relaxed`: chỉ nguyên tử, không ordering.
+- `memory_order_acquire` (CAS load): đảm bảo mọi load sau đó thấy giá trị tương ứng.
+- `memory_order_release` (CAS store): mọi store trước đó phải thấy được sau khi CAS thành công.
+- `memory_order_acq_rel`: cả hai.
+
+`compare_exchange_strong(expected, new, std::memory_order_acq_rel)` là pattern phổ biến cho mutex/queue. Trên x86, CMPXCHG mặc định tương đương `seq_cst` (acquire + release + fence).
+
+### Bước 6. Kết hợp fetch_add / fetch_sub / exchange
+
+CAS là building block. CPU/hardware còn cung cấp các atomic primitive khác:
+
+- `fetch_add(addr, n)`: nguyên tử `*addr += n`, trả old value.
+- `fetch_sub`, `fetch_or`, `fetch_and`, `fetch_xor`.
+- `exchange(addr, new)`: ghi giá trị mới, trả old value; không cần `expected`.
+- `atomic_increment/dec` (x86): đặc biệt tối ưu, không lock cache line nhiều.
+
+Counter increment có thể dùng `fetch_add` thay CAS loop. Khi cần load + modify, không có fetch_add phù hợp, dùng CAS.
+
+### Bước 7. Cache line bouncing và false sharing
+
+Trên multi-socket hoặc multi-core, mỗi CPU core có cache riêng. Khi core A ghi vào biến X, cache line của core B (chứa X) bị invalidate (MESI). Khi core B cần X, phải fetch từ RAM hoặc cache core A — chậm.
+
+False sharing: hai biến khác nhau nằm cùng cache line (64 byte trên x86). Core A ghi biến X → invalidate cache line; core B đọc biến Y cùng line cũng bị tống cache. Hiệu năng giảm trầm trọng. CAS làm tình trạng nặng thêm vì liên tục ghi.
+
+Giải pháp: padding giữa các biến thường bị CAS đồng thời; hoặc dùng struct riêng để compiler đặt vào cache line khác.
+
+### Bước 8. State diagram
+
+```mermaid
+stateDiagram-v2
+    [*] --> Read: load expected
+    Read --> Compare: CAS(expected, new)
+    Compare --> Success: memory == expected
+    Compare --> Fail: memory != expected
+    Success --> [*]
+    Fail --> Read: retry loop
+    Fail --> BackingOff: nhiều fail liên tục\n(thundering herd)
+
+    note right of Compare
+    CPU atomic instruction:
+    - x86: CMPXCHG
+    - ARM: LDXR + STXR
+    - RISC-V: LR/SC
+    end note
+```
+
+*Vòng đời CAS loop: load expected → CAS → success hoặc retry. Contention cao dẫn tới backoff (pause trên x86, yield cho OS) để giảm cache contention.*
+
+### Quan sát
+
+```bash
+# Linux: đếm số CAS trong workload thật
+perf stat -e cpu-cycles,cs_miss,cmp_xchg -p $(pidof myapp) sleep 5
+# Output minh họa: chưa chạy
+
+# xem CAS chậm do cache miss
+perf c2c record ./myapp
+perf c2c report  # báo cache-line contention
+
+# Trên macOS ARM, hardware atomic khác:
+# "x86_64-apple-darwin": CMPXCHGQ lock
+# "aarch64-apple-darwin": LDXR/STXR pair
+```
+
+### Ví dụ chạy từng bước
+
+Kịch bản: shared `int64 balance = 0` trên x86_64 Linux, 2 thread T1 và T2 cùng cộng 1000 vào balance bằng CAS loop (không mutex, không `fetch_add`). Kết quả mong đợi balance=2000. Hệ thống: 2 core, kernel tự do xen kẽ. Bảng dưới là một trong các kịch bản xen kẽ, mỗi bước nói **ai làm gì và vì sao**.
+
+| Bước | Thread | Hành động | Trạng thái |
+|---|---|---|---|
+| 1 | T1 | atomic load expected=0; desired=0+1000=1000; `CMPXCHG(0→1000)` | balance=1000, T1 success |
+| 2 | T2 | atomic load expected=0 (chạy song song từ trước, chưa sync với T1) | balance=0, T2 expected=0 |
+| 3 | T2 | desired=0+1000=1000; `CMPXCHG(0→1000)` | balance=1000 (do T1 đã ghi), T2 **fail**, old=1000 |
+| 4 | T2 | retry: load expected=1000, desired=2000; `CMPXCHG(1000→2000)` | balance=2000, T2 success |
+
+Tại sao bước 3 fail? CPU atomic compare thấy memory=1000 ≠ expected=0 nên không ghi. CAS trả old=1000, cập nhật expected của T2. Đây là bản chất CAS loop: mỗi fail phải cập nhật expected rồi tính desired mới. Nếu T2 dùng `if (CAS) { balance += 1000; }` thay vì retry, T2 bỏ qua khi fail, balance cuối =1000 (mất 1000). Đây là điểm khác biệt giữa "CAS một lần" và "CAS loop" — pattern chuẩn ở Câu 1 trong phần 3.
+
+Tại sao T2 không cần mutex? Vì CAS là atomic instruction ở hardware — không thể có 2 thread cùng thấy balance=0 và cùng ghi 1000. CPU đảm bảo chỉ một CMPXCHG thành công, thread còn lại nhận fail. Đây là định nghĩa atomicity ở Bước 1 trong phần 2 và Câu 4 trong phần 3.
+
+Biến thể lỗi 1: nếu balance là pointer thay vì int. T1 set pointer từ NULL→node1. T2 đọc pointer, lưu vào local. T1 free node1, T3 allocate node_mới trùng địa chỉ node1. T2 CAS(NULL→node_mới) thành công dù object đã bị free. Đây là **ABA**, Câu 2 trong phần 3. Fix: thêm version counter (tagged pointer) hoặc hazard pointer.
+
+Biến thể lỗi 2: contention cao, 100 thread cùng CAS. Mỗi fail burn CPU trong retry loop; cache line ping-pong giữa các core (mỗi CMPXCHG invalidate cache). Tỉ lệ retry có thể >50%, throughput tệ hơn mutex 5-10×. Trade-off đúng Câu 16 trong phần 3: "CAS lúc nào cũng nhanh hơn mutex" là sai.
+
+Điều rút ra: ví dụ minh họa CAS loop, atomicity, ABA, và contention trade-off — bốn câu hỏi phỏng vấn thường gặp. Không có bước thừa, không có con số bịa.
+
+## 3. Câu hỏi phỏng vấn
+
+### 3A. Câu hỏi đào sâu
+
+<details class="qa">
+<summary>Câu 1. Trình bày thuật toán lock-free increment dùng CAS. So sánh với mutex.</summary>
+
+**Trả lời ngắn:** CAS loop: đọc `expected = counter.load()`, thử `compare_exchange_weak(expected, expected + 1)`, nếu fail thì expected được cập nhật và retry. Mutex: lock, đọc, sửa, ghi, unlock. CAS không block; mutex block. CAS thắng khi contention thấp; mutex thắng khi contention cao hoặc logic phức tạp.
+
+**Đào sâu:**
+- Pseudocode CAS lock-free increment:
+  ```cpp
+  int expected = counter.load(std::memory_order_relaxed);
+  while (!counter.compare_exchange_weak(expected, expected + 1,
+                                        std::memory_order_relaxed,
+                                        std::memory_order_relaxed)) {
+      // expected đã được update bởi compare_exchange_weak
+  }
+  ```
+- Trade-off: CAS lock-free không switch context, giữ CPU. Mutex block giải phóng CPU nhưng mất ~1-10 µs để wake.
+- Contention: nhiều thread tăng cùng counter → CAS fail nhiều → "thundering herd" với retry. Mutex serialize các thread; CAS retry song song.
+- Trên x86, `LOCK INC` là atomic primitive hiệu quả hơn `LOCK CMPXCHG` cho increment đơn giản (1 micro-op). 
+- Java: `AtomicInteger.incrementAndGet()` dùng CAS loop hoặc `AtomicLongFieldUpdater` cho counter long. Go: `sync/atomic.AddInt64`.
+
+**Bẫy:** "Lock-free lúc nào cũng nhanh hơn mutex". Sai — chỉ thắng khi contention thấp. Contention cao, mutex serialize, lock-free retry storm, có thể chậm hơn 10×.
+
+**Follow-up:** `fetch_add` có cần CAS loop không? Không — `fetch_add` là một primitive, một lần gọi. CAS loop chỉ cần khi logic phức tạp hơn increment.
+</details>
+
+<details class="qa">
+<summary>Câu 2. ABA problem giải thích thế nào? Giải pháp?</summary>
+
+**Trả lời ngắn:** ABA xảy ra khi giá trị thay đổi A → B → A mà thread khác không nhận ra vì chỉ so sánh value, không có version. Phổ biến với lock-free stack/queue dùng pointer CAS. Giải pháp: thêm version counter 64-bit (tagged pointer), hoặc dùng hazard pointer/epoch-based reclamation.
+
+**Đào sâu:**
+- Ví dụ: stack top = `node1`. Thread A đọc top = node1, next = node2. Thread B pop node1, push node2, push lại node1 (lúc này node1 đã reuse, không phải object cũ nhưng có cùng address). Thread A CAS top = node2 → thành công vì top = node1 vẫn. Nhưng object node1 mới có next khác, hoặc nội dung khác — data corruption.
+- Tagged pointer: `(pointer << 16) | version` — 48-bit pointer + 16-bit version. CAS compare full 64-bit.
+- Hazard pointer: thread ghi "tôi đang dùng pointer này" trước khi dereference; writer (thread khác) kiểm tra không có hazard mới giải phóng.
+- Epoch-based reclamation: thread khai báo epoch hiện tại; writer giải phóng object sau vài epoch quay vòng.
+- Java: không cần quan tâm ABA nhiều vì GC tự động reclaim. C++/Rust: phải quản lý explicit.
+
+**Bẫy:** "64-bit address nên không ABA". Sai trên pointer (48-bit = có 16 bit dư không dùng được). Phải explicit tag.
+
+**Follow-up:** Java có thể xảy ra ABA không? Có — với `AtomicReference.compareAndSet` cho node trong queue. Tuy nhiên GC reclaim giảm hậu quả (object không bị reuse ngay như malloc); vẫn cẩn thận với logic.
+</details>
+
+<details class="qa">
+<summary>Câu 3. Tại sao mutex hiện đại vẫn dùng CAS ngay cả khi có futex?</summary>
+
+**Trả lời ngắn:** Mutex Linux NPTL dùng CAS làm fast path: khi không contention, lock và unlock chỉ là CAS trên word state, hoàn toàn trong user-space, không syscall, chi phí ~10-30 ns. Futex chỉ được dùng khi CAS fail (slow path — contention). Nhờ vậy mutex hiện đại gần như miễn phí khi không có tranh chấp.
+
+**Đào sâu:**
+- Code glibc `__pthread_mutex_lock` đại khái:
+  ```
+  if (cmpxchg(&mutex->__data.__lock, 0, 1) == 0) {
+      // got lock, fast path done
+      return;
+  }
+  // slow path: queue, futex wait
+  futex(&mutex->__data.__lock, FUTEX_WAIT, 1, NULL);
+  ```
+- Khi unlock: `if (cmpxchg(&mutex->__data.__lock, 1, 0) != 1) { wake futex; }`.
+- Adaptive mutex: trước khi sleep, spin vài lần (CAS + pause instruction). Thuận lợi nếu contention ngắn, thread khác unlock ngay.
+- Java `synchronized` biased lock (Java 6-15): có thread-id trong object header, CAS compare thread-id — nếu khớp, lock không cần atomic compare. Đã deprecated vì bảo mật và loại bỏ hoàn toàn ở Java 18.
+- Ưu điểm: đường nhanh gần miễn phí; đường chậm dùng kernel. Trade-off: implementation phức tạp, library libc có nhiều nhánh.
+
+**Bẫy:** "Mutex không có CAS". Sai — gần như mọi mutex user-space hiện đại đều có CAS fast path.
+
+**Follow-up:** Tại sao không dùng CAS thuần cho mutex thay vì dùng futex? Vì CAS không block thread khi contention; thread phải spin, CPU burn. Futex block thread đúng cách.
+</details>
+
+<details class="qa">
+<summary>Câu 4. Fetch-and-add và CAS khác nhau thế nào? Atomicity là gì?</summary>
+
+**Trả lời ngắn:** `fetch_add(addr, n)` là atomic primitive riêng: ghi `*addr += n` trong một instruction nguyên tử, trả old value. CAS là generic primitive: đọc, so sánh, ghi — cho phép logic phức tạp. Cả hai đều atomic ở mức hardware. "Atomic operation" nghĩa là operation nguyên tử — chạy như một bước duy nhất, không thread nào quan sát thấy trạng thái giữa chừng.
+
+**Đào sâu:**
+- Atomicity là "tất cả hoặc không có gì" — không quan sát thấy bước giữa. Counter increment không atomic nếu tách thành `load; add; store` vì thread khác có thể xen vào.
+- Hardware atomic: `LOCK XADD` (fetch-add), `LOCK CMPXCHG` (CAS), `LOCK XCHG` (exchange). Mỗi instruction ~10-100 ns qua memory bus.
+- Software atomic: sequence các atomic op + memory barrier + lock primitive để tổng quát hóa. SeqLock Linux là ví dụ: dùng sequence counter atomic kèm retry reader.
+- Transaction memory (HTM) trên Intel TSX/NVIDIA HPC: cho phép block lệnh atomic với hardware rollback khi conflict. Fallback sang mutex thường khi conflict nhiều. Đã deprecated ở thế hệ Skylake cuối.
+- Khi không thể hardware atomic: dùng mutex để serialize.
+
+**Bẫy:** "Atomic là atomic ở mọi nơi". Sai — atomic chỉ atomic trên biến/word được khai báo là atomic (vd C++ `std::atomic`). Biến thường không atomic khi đọc-ghi.
+
+**Follow-up:** Transaction memory có thay thế CAS không? Chưa — TSX deprecated. RTM (Restricted Transactional Memory) còn trên POWER, ARM. Ứng dụng dùng thử nhưng fallback về mutex.
+</details>
+
+<details class="qa">
+<summary>Câu 5. Implement lock-free queue (Treiber stack) bằng CAS. Bước chính?</summary>
+
+**Trả lời ngắn:** Treiber stack dùng CAS trên `top` pointer. Push: đọc `old_top = top`, tạo `new_node.next = old_top`, CAS `top` từ `old_top` sang `new_node`. Pop: đọc `old_top = top`, đọc `new_top = old_top.next`, CAS `top` từ `old_top` sang `new_top`. Cả hai đều vòng lặp retry khi fail.
+
+**Đào sâu:**
+- Pseudocode push:
+  ```cpp
+  void push(Node* node) {
+      Node* old_top = top.load();
+      do {
+          node->next = old_top;
+      } while (!top.compare_exchange_weak(old_top, node));
+  }
+  ```
+- Pseudocode pop:
+  ```cpp
+  Node* pop() {
+      Node* old_top = top.load();
+      Node* new_top;
+      do {
+          new_top = old_top->next;  // có thể fail nếu old_top reclaim
+      } while (!top.compare_exchange_weak(old_top, new_top));
+      return old_top;
+  }
+  ```
+- Vấn đề: ABA. Node cũ bị reclaim, sau đó allocate node mới trùng address. CAS so sánh `old_top` = `new_node.address` (cùng address) → success trong khi không nên.
+- Giải pháp: hazard pointer hoặc epoch reclamation. GC ngôn ngữ (Java) giảm vấn đề nhưng không loại bừ.
+- Linked queue (FIFO) phức tạp hơn: cần CAS hai đầu head và tail; `Michael & Scott` algorithm phổ biến.
+
+**Bẫy:** "Treiber stack lock-free là đơn giản". Sai — chỉ true trên slide. Trong production phải xử lý ABA + memory reclamation.
+
+**Follow-up:** `boost::lockfree::stack` có giải quyết ABA không? Có — dùng tagged pointer (boost 1.61+). Cũng có mode "multi-consumer" hoặc "single-consumer".
+</details>
+
+<details class="qa">
+<summary>Câu 6. Memory ordering trong CAS khi nào quan trọng?</summary>
+
+**Trả lời ngắn:** CAS phải đi kèm memory ordering. `memory_order_acquire` khi load, `memory_order_release` khi store, `memory_order_acq_rel` cho read-modify-write. Trên x86, `seq_cst` mặc định (đủ mạnh); trên ARM/RISC-V, phải explicit để có fence, nếu không compiler/CPU có thể reorder.
+
+**Đào sâu:**
+- Acquire: load sau CAS phải thấy store trước đó của thread đã thắng CAS. Quan trọng cho publishing pattern (thread A publish data → CAS pointer → thread B load pointer + read data).
+- Release: store trước CAS phải thấy được bởi thread sau khi nó quan sát giá trị mới. Quan trọng cho producer-consumer (thread A write data → CAS flag → thread B load flag + read data).
+- Acq_rel: cả hai — phù hợp cho hầu hết lock-free.
+- Relaxed: chỉ nguyên tử, không ordering. Phù hợp counter không cần sync với data khác.
+- Trên ARM: CMPXCHG_SUCCESS atomic instruction chỉ đảm bảo ordering trong vùng atomic; load/store xung quanh phải explicit fence (`dmb`/`ldaex`). Compiler có thể tự reorder nếu không ghi `memory_order`.
+
+**Bẫy:** "CAS nguyên tử thì memory ordering không quan trọng". Sai — atomic chỉ đảm bảo không hai CAS conflict. Reorder giữa load/CAS/store khác vẫn có thể xảy ra.
+
+**Follow-up:** Khi nào dùng `seq_cst` vs `acq_rel`? Mặc định `seq_cst` nếu không chắc. Chỉ xuống `acq_rel` khi benchmark cho thấy quá overhead. ARM/RISC-V có penalty; x86 gần như miễn phí.
+</details>
+
+<details class="qa">
+<summary>Câu 7 (Debug). Cùng một CAS 64-bit trên Linux x86 fail lạ thường trên ARM/Apple M2. Nguyên nhân?</summary>
+
+**Trả lời ngắn:** CAS 64-bit yêu cầu alignment 8 byte trên ARM để dùng `LDXR/STXR` đúng; trên Linux x86 đa số là `CMPXCHG8B/CMPXCHG16B` không yêu cầu alignment. Compiler/runtime khác nhau. Nguyên nhân khác: weak CAS trên ARM có thể fail spurious (exclusive monitor interrupted bởi interrupt hoặc context switch) — phải dùng `compare_exchange_strong` hoặc chấp nhận retry.
+
+**Đào sâu:**
+- Bước 1: kiểm tra biến atomic được align 8 byte (`alignas(8)` C++, hoặc `__attribute__((aligned(8)))`). Trên ARM, misaligned atomic đôi khi fallback sang kernel futex, chậm.
+- Bước 2: rebuild với `CMAKE_BUILD_TYPE=Release`; debug build compile chậm và có guard runtime.
+- Bước 3: kiểm `compare_exchange_weak` vs `_strong`. Weak fail spurious; nếu code không expect fail → logic lỗi. Dùng `_strong` nếu cần biết chính xác fail.
+- Bước 4: kiểm memory ordering — quên `memory_order_acquire`/`release` trên ARM có thể thấy giá trị stale.
+- Bước 5: build với `-fsanitize=thread` (TSan). TSan báo race hoặc atomic không đúng cách.
+
+**Bẫy:** "Test trên x86 là đủ". Sai — ARM có memory model khác, weak CAS fail spurious, alignment yêu cầu. Test trên mọi target architecture.
+
+**Follow-up:** Có công cụ portable testing không? `CDSChecker`, `Relacy`, `tsan` — model memory model + check race.
+</details>
+
+<details class="qa">
+<summary>Câu 8 (Thiết kế). Thiết kế high-throughput metrics counter, 100+ thread ghi vào, đọc bất kỳ lúc nào. CAS hay mutex?</summary>
+
+**Trả lời ngắn:** CAS với sharded counter hoặc thread-local + periodic merge. Hoặc `LongAdder` Java / `folly::AtomicHashMap` cho counter sharding. Mutex không cần nếu logic chỉ là tăng/giảm.
+
+**Đào sâu:**
+- Quyết định 1: counter đơn giản — `std::atomic<long long>` với `fetch_add`. CAS không cần vì `fetch_add` đã là hardware atomic, ~20-50 ns.
+- Quyết định 2: nếu contention cao (100+ thread tăng cùng counter), false sharing trên cache line. Sharded counter: mỗi thread có counter riêng (cache line riêng, padding), đọc thì sum all.
+- Quyết định 3: Java `LongAdder` tự động sharded theo thread hoặc CPU, gom lại khi `sum()`. Tránh contention mà không cần code sharded manual.
+- Quyết định 4: distribution thống kê (p50, p99) thì cần histogram → lock-free HDR Histogram hoặc bucket counter.
+- Quyết định 5: tránh mutex. Mutex lock/unlock ~50 ns; `fetch_add` ~10 ns. Nếu chỉ tăng counter, lock chỉ đắt thêm.
+- Đánh đổi: sharded counter tốn RAM (1 sharded counter cho mỗi thread) và `sum()` tốn O(n) với số shard. Nếu metric đọc thường xuyên, đánh giá kỹ.
+
+**Bẫy:** "Mutex cho counter là chuẩn". Sai — cho counter đơn giản, `atomic.fetch_add` nhanh hơn mutex nhiều và đơn giản hơn.
+
+**Follow-up:** Khi nào mutex thắng CAS? Khi logic phức tạp (compound check, cross-variable atomic), CAS không đủ.
+</details>
+
+### 3B. Câu hỏi phỏng vấn liên quan
+
+<details class="qa">
+<summary>Câu 9. CAS có phải là instruction duy nhất trên mọi CPU?</summary>
+
+**Trả lời:** Không. x86 có `CMPXCHG` (compare-and-exchange) là một instruction. ARM/Apple M-series dùng cặp `LDXR` + `STXR` (load-exclusive / store-exclusive). PowerPC dùng `lwarx/stwcx`. RISC-V dùng `LR/SC`. Trong C/C++, compiler ánh xạ `compare_exchange_*` xuống primitive phù hợp nền tảng; programmer không cần biết.
+</details>
+
+<details class="qa">
+<summary>Câu 10. `compare_exchange_weak` và `compare_exchange_strong` khác nhau?</summary>
+
+**Trả lời:** Weak có thể fail spurious ngay cả khi giá trị bằng expected — trên ARM/RISC-V khi exclusive monitor fail do interrupt, context switch. Weak phù hợp CAS loop vì đã retry; strong phù hợp khi cần biết fail chính xác. Trên x86, weak và strong gần như nhau (CMPXCHG không fail spurious).
+</details>
+
+<details class="qa">
+<summary>Câu 11. CAS có đảm bảo visibility trên multi-core không?</summary>
+
+**Trả lời:** Đúng nếu dùng đúng memory ordering. Trên x86, `seq_cst` (mặc định) đảm bảo full fence. Trên ARM, phải dùng `memory_order_acquire/release/acq_rel` để có fence. Java `volatile` đi kèm `AtomicReference.compareAndSet` đảm bảo visibility. Quên ordering trên ARM có thể thấy giá trị stale (compiler/CPU reorder).
+</details>
+
+<details class="qa">
+<summary>Câu 12. False sharing ảnh hưởng CAS thế nào?</summary>
+
+**Trả lời:** Cache line thường 64 byte. Hai biến trong cùng line, ghi vào biến này sẽ invalidate cache ở core khác đang giữ line đó. Với CAS, contention cao → retry nhiều → invalidate liên tục, throughput giảm mạnh. Giải pháp: padding biến (đặt vào cache line riêng); chia sharded counter.
+</details>
+
+<details class="qa">
+<summary>Câu 13. Khi nào fetch_add tốt hơn CAS?</summary>
+
+**Trả lời:** Khi logic đơn giản, chỉ tăng/giảm hoặc cộng bit. `fetch_add(addr, n)` là một instruction nguyên tử tối ưu, không cần compare-expect. CAS loop có compare + retry — đắt hơn. Tuy nhiên `fetch_add` không linh hoạt (không điều kiện, không so sánh phi-tuyến); phức tạp → CAS.
+</details>
+
+<details class="qa">
+<summary>Câu 14. CAS có thể xảy ra starvation không?</summary>
+
+**Trả lời:** Có. Trong CAS loop, thread nào cũng có thể retry liên tục mà không progress — đặc biệt với back-off ngắn và contention cao. Mặc dù không "đứng yên" như mutex, một thread có thể lặp vô hạn không CAS thành công (livelock). Đây là khác biệt quan trọng với mutex, nơi thread cuối cùng được wake và progress đảm bảo. Trong thực tế cực kỳ hiếm với exponential backoff, nhưng không guaranteed.
+</details>
+
+<details class="qa">
+<summary>Câu 15. Hardware Transactional Memory (HTM/TSX) có thay thế CAS không?</summary>
+
+**Trả lời:** Về nguyên tắc có thể — TSX cho phép block code atomic với hardware rollback. Thực tế Intel đã disable TSX trên nhiều SKU sau lỗi silicon (Skylake cuối); POWER còn RTM. ARM LSE (Large System Extensions) vẫn dùng primitive atomic, không có HTM. Hiện tại CAS vẫn là mainstream. Tương lai có thể có HTM trở lại nhưng hiện tại không production.
+</details>
+
+<details class="qa">
+<summary>Câu 16. Đúng hay sai: "CAS không block nên lúc nào cũng nhanh hơn mutex."</summary>
+
+**Trả lời:** Sai nghe đúng nhưng sai. Khi contention thấp, CAS nhanh hơn (không sleep). Khi contention cao, CAS retry storm burn CPU nhiều hơn mutex vốn sleep giải phóng CPU. Đặc biệt trên multi-core, cache line ping-pong từ CAS retry làm throughput của cả hệ thống suy giảm. Mutex serialize sạch sẽ. Trade-off cần benchmark.
+</details>
+
+## 4. Đánh đổi và sự cố production
+
+### So sánh khi lựa chọn primitive
+
+| Tiêu chí | `fetch_add`/`fetch_or` | CAS loop | Mutex | Spinlock |
+|---|---|---|---|---|
+| Chi phí không contention | ~10-20 ns | ~30-60 ns | ~25-50 ns (fast path) | ~10-20 ns |
+| Khi contention | retry (busy) | retry (busy) | sleep + wake | burn CPU |
+| Độ phức tạp logic | Chỉ `modify` | Tùy ý | Tùy ý | Tùy ý |
+| Cần memory ordering | Có (thường explicit) | Có | Không (mutex ngầm fence) | Không |
+| Xử lý ABA | Tự bảo vệ | Phải xử lý | Không cần | Không cần |
+| Race detector | Dễ | Cần TSan | Dễ | Dễ |
+
+### Năm failure mode
+
+| Triệu chứng | Nguyên nhân gốc | Cách kiểm tra | Cách sửa |
+|---|---|---|---|
+| Throughput giảm khi contention cao | CAS retry storm, cache ping-pong | `perf c2c`, tỉ lệ `cmp_xchg`/`cs_miss`, tỉ lệ retry | Sharded counter; mutex cho hot path |
+| ABA bug (data corruption, use-after-free) | Pointer CAS không có version | Test thử delete-allocate-delete; Relacy/CDSChecker | Tagged pointer + version; hazard pointer; epoch reclamation |
+| Logic lỗi trên ARM (test ở x86 pass, ARM fail) | `compare_exchange_weak` fail spurious; quên `memory_order_acquire/release` | Test đa-architecture; review `compare_exchange_*` | Dùng `_strong` nếu cần chính xác; explicit ordering ARM/RISC-V |
+| Cache line ping-pong, latency tăng | Hai biến cùng cache line, ghi từ 2 core | `perf c2c` chỉ cache-line conflict | Padding 64-byte; dùng struct thay vì mảng biến thường |
+| Livelock (thread retry mãi không progress) | `compare_exchange_weak` cùng contended memory, không backoff | Loop detection; monitoring | Exponential backoff; mutex khi cần fairness |
+
+## 5. Cheat sheet
+
+| Chủ đề | Con số / quy tắc cần nhớ |
+|---|---|
+| CAS | Atomic compare expected vs memory, swap nếu bằng, không swap nếu không |
+| x86 primitive | `CMPXCHG` (compare-exchange); `LOCK XADD` (fetch-add) |
+| ARM primitive | `LDXR` + `STXR` (load-store exclusive pair) |
+| CAS loop | Read → compare → on fail reload and retry |
+| ABA | Pointer quay vòng A → B → A; giải pháp tagged pointer / hazard |
+| Memory ordering | `relaxed` (chỉ atomic), `acquire`, `release`, `acq_rel`, `seq_cst` |
+| Counter | `fetch_add`/`std::atomic::++` ~20-50 ns; CAS loop đắt hơn |
+| Sharded counter | Tránh false sharing; dùng `LongAdder` (Java), `thread_local` + merge |
+| Mutex fast path | CAS user-space ~10-30 ns (Linux NPTL) |
+| Lock-free trade-off | Không block; retry storm với contention cao |
+
+**Học tiếp:**
+- [mutex-vs-lock](mutex-vs-lock.md) — mutex hiện đại dùng CAS cho fast path
+- [race-condition](race-condition.md) — CAS và mutex đều giải quyết race, chọn theo logic
+- [condition-variable](condition-variable.md) — CV là cơ chế chờ predicate, không phải CAS
+- [Operating Systems/cpu-scheduling](../Operating%20Systems/cpu-scheduling.md) — scheduler wake thread khi CAS unlock futex
+
+**Kiểm tra nhanh trước phỏng vấn:**
+- Nói được thuật toán CAS loop bằng pseudocode.
+- Phân biệt `compare_exchange_weak` vs `_strong`, khi nào dùng.
+- Giải thích ABA có ví dụ (pointer reuse), nhắc tagged pointer.
+- Nêu x86 vs ARM CAS primitive khác nhau (`CMPXCHG` vs `LDXR/STXR`).
+- Memory ordering: `seq_cst`/`acq_rel`/`relaxed` dùng khi nào.
+- Trade-off CAS vs mutex khi contention — không nói "CAS luôn thắng".

@@ -1,0 +1,24 @@
+sequenceDiagram
+  participant C as Client
+  participant E as Edge WAF/CDN
+  participant L as Load Balancer
+  participant A as Order Service
+  participant D as Database
+  C->>E: POST /orders (Idempotency-Key)
+  Note over E: Có thể trả 403 (WAF) hoặc 429 (rate limit) ngay tại đây, origin không thấy request
+  E->>L: forward
+  Note over L: 503 nếu không còn upstream khỏe<br/>502 nếu upstream đóng kết nối hoặc trả rác<br/>504 nếu upstream quá timeout
+  L->>A: forward
+  A->>A: authn, authz, validate
+  Note over A: HOT PATH rẻ: 401, 403, 400, 422 trả trước khi chạm DB
+  A->>D: INSERT order
+  alt thành công
+    D-->>A: ok
+    A-->>C: 201 Created + Location
+  else trùng unique key
+    D-->>A: duplicate key
+    A-->>C: 409 Conflict
+  else DB timeout (có thể block)
+    D--xA: timeout
+    A-->>C: 503 + Retry-After
+  end

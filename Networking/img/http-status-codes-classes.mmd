@@ -1,0 +1,8 @@
+flowchart LR
+  R["Status line<br/>HTTP/1.1 NNN reason"] --> C1["1xx Informational<br/>100, 101, 103"]
+  R --> C2["2xx Success<br/>200, 201, 202, 204, 206"]
+  R --> C3["3xx Redirection<br/>301, 302, 304, 307, 308"]
+  R --> C4["4xx Client error<br/>400, 401, 403, 404, 409, 422, 429"]
+  R --> C5["5xx Server error<br/>500, 502, 503, 504"]
+  C4 -.->|"giữ nguyên request thì retry vô ích"| X1["Client phải sửa request"]
+  C5 -.->|"retry có điều kiện"| X2["Cần idempotency, backoff, jitter"]

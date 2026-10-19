@@ -1,0 +1,9 @@
+flowchart LR
+  C["Client SDK<br/>retry + jitter"] --> E["Edge<br/>WAF, rate limit 429"]
+  E --> G["API Gateway<br/>authn 401, routing 404"]
+  G --> S["Service<br/>validate 400/422, domain 409"]
+  S --> D[("Database")]
+  S --> Q["Idempotency store<br/>Redis, TTL 24h"]
+  G --> M["Metrics<br/>status class, route, upstream"]
+  S --> M
+  M --> AL["Alert theo SLO<br/>tỷ lệ 5xx, p99"]

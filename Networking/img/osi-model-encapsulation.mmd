@@ -1,0 +1,22 @@
+sequenceDiagram
+    participant App as App (HTTP)
+    participant T as Transport (TCP)
+    participant N as Network (IP)
+    participant D as Data Link (Eth)
+    participant P as Physical (cáp)
+    participant R as Router
+    participant D2 as Data Link (Eth)
+    participant N2 as Network (IP)
+    participant T2 as Transport (TCP)
+    participant App2 as App (HTTP)
+
+    App->>T: HTTP GET /orders/1002
+    T->>N: TCP segment (20B header)
+    N->>D: IP datagram (20B header)
+    D->>P: Ethernet frame (14B header + CRC)
+    P->>R: Bit trên cáp
+    Note over R: Router đọc dst IP,<br/>giảm TTL, đóng Ethernet mới
+    R->>D2: Ethernet frame (MAC mới)
+    D2->>N2: IP datagram (TTL-1)
+    N2->>T2: TCP segment
+    T2->>App2: HTTP GET

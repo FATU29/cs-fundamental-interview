@@ -1,0 +1,24 @@
+sequenceDiagram
+  participant App as App<br/>(getaddrinfo)
+  participant Stub as Stub resolver<br/>(glibc, Go net)
+  participant Rec as Recursive resolver<br/>(8.8.8.8)
+  participant Root as Root NS<br/>(a.root-servers.net)
+  participant TLD as .com NS<br/>(gtld-servers.net)
+  participant Auth as example.com<br/>authoritative
+  participant Cache as Recursive<br/>cache (RAM/DB)
+
+  App->>Stub: getaddrinfo(www.example.com)
+  Stub->>Rec: UDP 53 query A www.example.com (recursive)
+  Note over Rec: Cache miss
+  Rec->>Root: UDP 53 query (iterative)
+  Root-->>Rec: referral .com NS list
+  Rec->>TLD: UDP 53 query (iterative)
+  TLD-->>Rec: referral example.com NS list
+  Rec->>Auth: UDP 53 query (iterative)
+  Auth-->>Rec: answer A 93.184.216.34 TTL 86400
+  Rec->>Cache: store name type IP TTL expiry
+  Rec-->>Stub: UDP 53 answer
+  Stub-->>App: 93.184.216.34
+  Note over Stub,Cache: Truy vấn sau trong TTL: cache hit, không đi ra Internet
+  Note over Rec: Neu response > 512 byte EDNS, chuyen TCP 53
+  Note over Rec: DNSSEC: xac thuc bang DS chain tu root

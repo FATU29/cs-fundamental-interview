@@ -1,0 +1,38 @@
+sequenceDiagram
+    autonumber
+    participant U as Người dùng
+    participant BR as Trình duyệt
+    participant HST as HSTS preload
+    participant DC as Browser DNS cache
+    participant OS as OS resolver
+    participant RR as Recursive resolver
+    participant AR as ARP cache
+    participant TC as TCP kernel
+    participant TL as TLS userland
+    participant CD as CDN edge (GFE)
+
+    U->>BR: Enter "google.com"
+    BR->>HST: google.com trong HSTS preload?
+    HST-->>BR: có, scheme = https
+    BR->>DC: getaddrinfo("google.com")
+    DC-->>BR: miss → chuyển OS
+    OS->>RR: query A google.com (UDP/53)
+    RR-->>OS: IP (Anycast, 142.250.x.x)
+    OS-->>BR: IP
+    BR->>AR: MAC của default gateway?
+    AR-->>BR: có (hoặc gửi ARP request)
+    BR->>TC: connect(IP, 443, SNI=google.com)
+    TC->>CD: SYN
+    CD-->>TC: SYN-ACK
+    TC-->>CD: ACK (TCP done)
+    Note over TC,CD: +1 RTT TCP
+    BR->>TL: TLS 1.3 ClientHello + key_share
+    TL->>CD: ServerHello + EncryptedExtensions + Cert + Finished
+    CD-->>TL: Finished
+    Note over BR,CD: +1 RTT TLS
+    BR->>CD: HTTP/2 GET / (encrypted)
+    alt deployment trả 301
+        CD-->>BR: 301 → https://www.google.com/
+    else deployment trả thẳng
+        CD-->>BR: 200 OK + HTML gzipped
+    end

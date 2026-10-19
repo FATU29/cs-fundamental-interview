@@ -1,0 +1,11 @@
+stateDiagram-v2
+  [*] --> Anonymous: client chưa có session ID
+  Anonymous --> Active: server cấp session ID (login)
+  Active --> Active: request hợp lệ, sliding TTL
+  Active --> Idle: TTL hết, không có request
+  Idle --> Active: client gửi lại trong grace window
+  Active --> Revoked: logout hoặc admin thu hồi
+  Idle --> Revoked: TTL hết hẳn, xóa khỏi store
+  Active --> Replaced: phát hiện session ID khác trên request (fixation)
+  Replaced --> Active: server đổi ID, copy state sang ID mới
+  Revoked --> [*]

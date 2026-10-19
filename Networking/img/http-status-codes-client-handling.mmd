@@ -1,0 +1,13 @@
+flowchart TD
+  R["Nhận response"] --> K{"Lớp status"}
+  K -- "2xx" --> OK["Thành công, đọc body"]
+  K -- "3xx" --> RD["Theo Location<br/>tối đa vài hop"]
+  K -- "4xx" --> C4{"408, 425, 429?"}
+  C4 -- "không" --> F4["Không retry<br/>báo lỗi cho người dùng"]
+  C4 -- "có" --> W["Chờ Retry-After<br/>hoặc backoff + jitter"]
+  K -- "5xx" --> I{"Request idempotent<br/>hoặc có Idempotency-Key?"}
+  I -- "không" --> F5["Không retry tự động"]
+  I -- "có" --> W
+  W --> B{"Còn retry budget?"}
+  B -- "có" --> R
+  B -- "không" --> F5

@@ -1,0 +1,20 @@
+---
+description: Always read FUNDAMENTALS_PROMPT.md first and follow its 5-part interview-focused format (Markdown only)
+alwaysApply: true
+---
+
+# Fundamentals Prompt
+
+Before answering any user prompt in this repo, read `FUNDAMENTALS_PROMPT.md` at the workspace root in full and follow it.
+
+- Treat the user's message as the topic/question to analyze.
+- Answer in the exact 5-part structure of section 3: short "what it is", core mechanism, then interview questions as the main and longest part, trade-offs and production failures, cheat sheet.
+- Section 3 MUST have both `### 3A. Câu hỏi đào sâu` and `### 3B. Câu hỏi phỏng vấn liên quan` (8-12 related questions with answers, at least one "true or false" trap). Never ship an article without 3B.
+- Interview style: short answers the interviewer understands, then depth to survive follow-ups. No history, no long glossaries, no everyday metaphors, no filler. Stay within the per-part word ranges.
+- Keep the article title (and interview question titles) in English, verbatim from the user's question. The body is Vietnamese.
+- Every CS/IT answer MUST be written to disk as ONE `.md` file in the matching topic folder, registered in `registry.js`, and built with `node tools/build-md.js` (sections 6 to 7). Use `_template/article.template.md`. Do NOT create any `.html` article file.
+- Write files in small chunks (section 6). After each write, verify the content landed (read back or check size).
+- Markdown only: GFM tables, `<details class="qa">` for questions, no inline styles, no scripts, no external resources. Links to other articles use the `.md` form.
+- Diagrams: write them as ```mermaid blocks directly in the `.md` with a one-line caption (section 7.4). No `.mmd` or `.png` files for new articles.
+- In chat, reply only with the `.md` file path, a short summary, per-part word counts, open uncertainties, and what was not verified (section 9.2).
+- If the user's message is clearly not a CS/IT concept question (e.g. file operations, tooling, edits to this repo), skip the format and file output, but still obey the quality rules in section 2.

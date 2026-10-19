@@ -1,0 +1,16 @@
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    C->>S: SYN (seq=x, cwnd=10 MSS)
+    Note over S: SYN_RCVD<br/>half-open state
+    S-->>C: SYN,ACK (seq=y, ack=x+1)
+    Note over C: Client sẵn sàng<br/>Gửi data hoặc ACK
+    C->>S: ACK (seq=x+1, ack=y+1)
+    Note over C,S: ESTABLISHED
+    Note over C,S: Data transfer begins
+    C->>S: FIN (active close)
+    S-->>C: ACK
+    S-->>C: FIN (passive close)
+    C->>S: ACK
+    Note over C: TIME_WAIT 60s<br/>(Linux default)
+    Note over S: CLOSED

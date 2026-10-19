@@ -1,0 +1,14 @@
+sequenceDiagram
+    participant C as Client
+    participant G as Cache / Gateway
+    participant S as API server
+
+    C->>G: GET /orders/42
+    G->>S: GET /orders/42 (cache miss)
+    S-->>G: 200 + ETag "v7" + Cache-Control: max-age=60
+    G-->>C: 200 + ETag "v7"
+    Note over C,G: After max-age expires
+    C->>G: GET /orders/42<br/>If-None-Match: "v7"
+    G->>S: GET /orders/42<br/>If-None-Match: "v7"
+    S-->>G: 304 Not Modified (no body)
+    G-->>C: 304, client reuses cached body

@@ -1,0 +1,17 @@
+sequenceDiagram
+    participant A as Sender
+    participant N as Network
+    participant B as Receiver
+    A->>N: seq=1, payload P1
+    N-->>B: datagram 1 ok
+    B-->>A: ACK seq=2
+    A->>N: seq=2, payload P2
+    N--xB: datagram 2 lost
+    Note over A: timeout T<br/>no ACK for seq=2
+    A->>N: seq=2 retransmit
+    N-->>B: datagram 2 ok
+    B-->>A: ACK seq=3
+    A->>N: seq=3, payload P3
+    N-->>B: datagram 3 ok
+    Note over B: P2 arrives sau P3<br/>jitter buffer reorder by seq
+    B-->>A: ACK seq=4

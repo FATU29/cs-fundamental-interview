@@ -1,0 +1,17 @@
+sequenceDiagram
+  participant U as Browser
+  participant C as Client backend
+  participant AS as Authorization Server (IdP)
+  participant API as Resource Server
+  C->>U: 302 to /authorize (code_challenge S256, state, scope)
+  U->>AS: GET /authorize
+  Note over AS: AUTHENTICATION here:<br/>password, MFA, passkey
+  AS-->>U: 302 to redirect_uri?code=...
+  U->>C: GET /callback (code, state)
+  Note over C: verify state matches session
+  C->>AS: POST /token (code, code_verifier, client auth)
+  Note over AS: verify SHA256(verifier) = challenge
+  AS-->>C: id_token + access_token + refresh_token
+  C->>API: GET /orders (Authorization: Bearer access_token)
+  Note over API: AUTHORIZATION: verify JWT, then check resource ownership
+  API-->>C: 200 or 403

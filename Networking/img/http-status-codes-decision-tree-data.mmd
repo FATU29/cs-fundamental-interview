@@ -1,0 +1,8 @@
+flowchart LR
+  A["Đã qua auth và có quyền"] --> E{"Tài nguyên<br/>tồn tại?"}
+  E -- "không, không được lộ" --> R404b["404 Not Found"]
+  E -- "không, được lộ" --> R403b["403 Forbidden"]
+  E -- "có" --> F{"Dữ liệu hợp lệ<br/>và không xung đột?"}
+  F -- "sai dữ liệu" --> R422["422 Unprocessable Content"]
+  F -- "xung đột trạng thái" --> R409["409 Conflict"]
+  F -- "ổn" --> OK["2xx thành công<br/>200, 201, 202, 204, 206"]

@@ -1,0 +1,9 @@
+flowchart LR
+    C["Client<br/>browser, mobile, service"]
+    G["API gateway / CDN<br/>cache, auth, rate limit"]
+    S["Stateless API servers<br/>resources + representations"]
+    D[("Database")]
+    C -->|"HTTP: method + URI + headers"| G
+    G --> S
+    S --> D
+    S -->|"status + representation + links"| C

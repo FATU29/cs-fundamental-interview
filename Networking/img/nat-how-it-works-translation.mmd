@@ -1,0 +1,12 @@
+sequenceDiagram
+    participant A as Host A 192.168.1.10:51000
+    participant N as NAT 203.0.113.5
+    participant S as Server 198.51.100.7:443
+
+    A->>N: SYN src 192.168.1.10:51000 dst 198.51.100.7:443
+    Note over N: No entry yet. Create mapping<br/>192.168.1.10:51000 <-> 203.0.113.5:40001
+    N->>S: SYN src 203.0.113.5:40001 dst 198.51.100.7:443
+    S-->>N: SYN-ACK dst 203.0.113.5:40001
+    Note over N: Lookup by dst port 40001,<br/>rewrite dst back
+    N-->>A: SYN-ACK dst 192.168.1.10:51000
+    Note over N: Entry expires after idle timeout

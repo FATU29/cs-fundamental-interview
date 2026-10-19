@@ -1,0 +1,8 @@
+flowchart TD
+    BR["Trình duyệt<br/>omnibox, HSTS preload, host cache, connection pool"] --> OSR["OS resolver<br/>getaddrinfo, mDNSResponder"]
+    OSR --> RR["Recursive resolver<br/>8.8.8.8, 1.1.1.1"]
+    RR --> AUTH["root → TLD → authoritative"]
+    BR --> KRN["Kernel network stack<br/>TCP, ARP/NDP, route table"]
+    KRN --> TLS["TLS userland<br/>BoringSSL (Chrome), NSS (Firefox)"]
+    KRN --> NIC["NIC / driver<br/>Ethernet hoặc Wi-Fi"]
+    NIC --> GFE["CDN edge<br/>terminate TLS, trả HTML/redirect"]

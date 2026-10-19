@@ -1,0 +1,21 @@
+---
+title: DNS resolution — từ stub đến authoritative
+---
+sequenceDiagram
+    participant C as Client
+    participant ST as Stub resolver
+    participant RR as Recursive resolver
+    participant ROOT as Root (.)
+    participant TLD as TLD (.com)
+    participant AUTH as Auth (example.com)
+
+    C->>+ST: getaddrinfo("api.example.com")
+    ST->>+RR: Query A api.example.com
+    RR->>+ROOT: Iterative: ai trả lời cho . ?
+    ROOT-->>-RR: Hỏi .com (a.gtld-servers.net)
+    RR->>+TLD: Iterative: ai trả lời cho example.com ?
+    TLD-->>-RR: Hỏi ns.example.com (glue A)
+    RR->>+AUTH: Query A api.example.com
+    AUTH-->>-RR: 203.0.113.10, TTL=300, AA=1
+    RR-->>+ST: 203.0.113.10
+    ST-->>-C: IP

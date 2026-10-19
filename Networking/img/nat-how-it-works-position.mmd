@@ -1,0 +1,8 @@
+flowchart LR
+    H1["Host A<br/>192.168.1.10"]
+    H2["Host B<br/>192.168.1.11"]
+    R["NAT router<br/>inside: 192.168.1.1<br/>outside: 203.0.113.5"]
+    I(("Internet<br/>server 198.51.100.7:443"))
+    H1 --> R
+    H2 --> R
+    R -->|"src rewritten to<br/>203.0.113.5:port"| I

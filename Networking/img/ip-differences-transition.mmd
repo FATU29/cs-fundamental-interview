@@ -1,0 +1,6 @@
+flowchart TD
+  Q1{"Client có IPv6?"} -- "có" --> Q2{"Server có IPv6?"}
+  Q2 -- "có" --> DS["Dual-stack<br/>cả A và AAAA, thử song song"]
+  Q1 -- "không" --> V4["IPv4-only"]
+  Q2 -- "không" --> NAT64["NAT64 + DNS64<br/>client v6 gọi server v4"]
+  DS -. "Happy Eyeballs" .-> DS

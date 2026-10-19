@@ -1,0 +1,12 @@
+flowchart LR
+    Start["Nhan cert"] --> Sig{"Chu ky<br/>hop le?"}
+    Sig -->|Sai| Fail["Tu choi"]
+    Sig -->|Dung| San{"Hostname<br/>trong SAN?"}
+    San -->|Khong| Fail
+    San -->|Co| Val{"Con thoi han?"}
+    Val -->|Het han| Fail
+    Val -->|Hop le| Rev{"Khong bi<br/>revoked?"}
+    Rev -->|Bi thu hoi| Fail
+    Rev -->|OK| Root{"Root co trong<br/>trust store?"}
+    Root -->|Khong| Fail
+    Root -->|Co| Ok["Chap nhan"]

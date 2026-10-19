@@ -1,0 +1,14 @@
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+
+    Note over C,S: RTT 1 - plaintext ClientHello, ServerHello
+    C->>S: ClientHello<br/>supported_versions 1.3<br/>key_share ECDHE X25519<br/>SNI, ALPN h2 / h3
+    S-->>C: ServerHello<br/>chon cipher + key_share
+
+    Note over C,S: Tu sau ServerHello: ma hoa bang handshake traffic key<br/>HKDF(ECDHE shared secret)
+    S-->>C: EncryptedExtensions (ALPN)<br/>Certificate (leaf -> intermediate)<br/>CertificateVerify (ky transcript)<br/>Finished (verify MAC transcript)
+
+    Note over C: verify cert chain<br/>verify CertificateVerify<br/>verify Finished -> tra hash khop
+    C->>S: Finished + HTTP request (ma hoa AEAD)
+    S-->>C: HTTP 200 OK (ma hoa AEAD)

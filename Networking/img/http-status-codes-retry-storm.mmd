@@ -1,0 +1,16 @@
+sequenceDiagram
+  participant C as 10.000 client
+  participant L as Load Balancer
+  participant A as Service
+  participant D as Database
+  Note over D: T+0 DB chậm do khóa bảng, p99 từ 20ms lên 8s
+  C->>L: request (timeout phía client 3s)
+  L->>A: forward
+  A->>D: query (BLOCK chờ DB)
+  Note over A: thread pool đầy, hàng đợi dài dần
+  L-->>C: 504 sau khi hết timeout
+  Note over C: retry ngay 3 lần, không backoff, tải gấp 4
+  C->>L: retry lần 1, 2, 3
+  Note over A: vẫn xử lý các request cũ mà client đã bỏ đi
+  L-->>C: 503 vì không còn upstream khỏe
+  Note over C,L: DB hồi phục nhưng backlog vẫn đè service, sập lần hai

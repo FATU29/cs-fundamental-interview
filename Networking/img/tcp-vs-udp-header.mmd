@@ -1,0 +1,16 @@
+flowchart LR
+    subgraph TCPseg["TCP Segment (20-60B)"]
+        direction LR
+        SP["Src Port<br/>16b"] --> DP["Dst Port<br/>16b"]
+        DP --> SEQ["Seq<br/>32b"]
+        SEQ --> ACK["Ack<br/>32b"]
+        ACK --> DO["Data<br/>Offset<br/>4b"] --> FL["Flags<br/>8b"] --> WIN["Window<br/>16b"]
+        WIN --> CS["Checksum<br/>16b"] --> UR["Urgent<br/>16b"] --> OPT["Options<br/>0-40B"]
+    end
+    subgraph UDPdg["UDP Datagram (8B)"]
+        direction LR
+        USP["Src Port<br/>16b"] --> UDP["Dst Port<br/>16b"]
+        UDP --> UL["Length<br/>16b"] --> UCS["Checksum<br/>16b"]
+    end
+    style TCPseg fill:#b3e0ff
+    style UDPdg fill:#ffe0b3

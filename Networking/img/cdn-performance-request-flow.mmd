@@ -1,0 +1,24 @@
+sequenceDiagram
+  participant C as Client
+  participant E as Edge PoP
+  participant SH as Origin Shield
+  participant O as Origin
+
+  C->>E: HTTPS request (TLS 0-RTT/1-RTT)
+  E->>E: Tra cache key (RAM/SSD)
+  alt Cache HIT
+    E->>C: Response từ cache + header Age
+  else Cache MISS
+    E->>SH: Gọi về shield (hoặc gốc)
+    SH->>SH: Tra cache shield
+    alt Shield HIT
+      SH->>E: Response từ shield
+    else Shield MISS
+      SH->>O: Gọi về origin (connection reuse)
+      O->>SH: Response
+      SH->>SH: Lưu vào cache shield
+    end
+    SH->>E: Response
+    E->>E: Lưu vào cache edge
+    E->>C: Response
+  end

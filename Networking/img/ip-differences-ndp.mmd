@@ -1,0 +1,11 @@
+sequenceDiagram
+  participant H as Host A 2001:db8::a
+  participant R as Router
+  participant H2 as Host B 2001:db8::b
+  H->>R: NS (Neighbor Solicitation)<br/>target = 2001:db8::b<br/>src = :: (DAD)
+  R->>H2: NS forwarded via multicast<br/>ff02::1:ff... (solicited-node)
+  H2->>H: NA (Neighbor Advertisement)<br/>MAC_H2 cached
+  H->>R: ICMPv6 Echo Request
+  R->>H2: forward
+  H2->>R: ICMPv6 Echo Reply
+  R->>H: Echo Reply

@@ -1,0 +1,12 @@
+flowchart TB
+    A["HTTP request/response<br/>GET /orders, headers, cookies"]
+    B["TLS record layer<br/>AEAD: AES-GCM hoac ChaCha20-Poly1305"]
+    C["TCP<br/>cong 443 (HTTPS) hoac 80 (HTTP)"]
+    D["IP<br/>src/dst IP, length, timing"]
+    A --> B
+    B --> C
+    C --> D
+    style A fill:#e1f5fe
+    style B fill:#fff3e0
+    style C fill:#f3e5f5
+    style D fill:#eceff1

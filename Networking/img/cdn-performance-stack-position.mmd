@@ -1,0 +1,8 @@
+flowchart TD
+  CL["Client<br/>trình duyệt, app"] --> DNS["DNS của CDN<br/>anycast hoặc GeoDNS<br/>trả IP edge gần nhất"]
+  DNS --> EDGE["Edge PoP<br/>TLS termination<br/>cache RAM/SSD<br/>edge compute"]
+  EDGE -->|"cache hit"| CL
+  EDGE -->|"cache miss"| SH["Origin shield<br/>gộp request cùng URL"]
+  SH -->|"miss"| ORI["Origin<br/>web server, object storage"]
+  ORI --> SH
+  SH --> EDGE

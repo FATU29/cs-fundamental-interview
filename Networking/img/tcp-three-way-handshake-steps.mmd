@@ -1,0 +1,11 @@
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    C->>S: SYN<br/>seq=x (ISN_C)
+    Note over S: alloc SYN queue<br/>state: SYN_RCVD
+    S-->>C: SYN, ACK<br/>seq=y (ISN_S), ack=x+1
+    Note over C: alloc TCB<br/>state: ESTABLISHED
+    C->>S: ACK<br/>seq=x+1, ack=y+1
+    Note over S: state: ESTABLISHED
+    C->>S: data (seq=x+1, ack=y+1)
+    Note over C,S: ACK thứ 3 có thể<br/>mang payload (slow start)

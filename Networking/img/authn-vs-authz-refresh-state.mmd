@@ -1,0 +1,8 @@
+stateDiagram-v2
+  [*] --> Active: cấp trong family F
+  Active --> Used: client đổi lấy refresh token mới
+  Active --> Expired: hết hạn tuyệt đối
+  Active --> Revoked: logout hoặc admin thu hồi
+  Used --> Revoked: token cũ bị trình lại (reuse) → thu hồi cả family F
+  Revoked --> [*]
+  Expired --> [*]

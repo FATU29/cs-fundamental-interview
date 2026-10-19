@@ -1,0 +1,9 @@
+stateDiagram-v2
+    [*] --> Healthy
+    Healthy --> Buffering: datagram arrives
+    Buffering --> Healthy: app reads via recvmsg
+    Buffering --> Buffering: datagram arrives
+    Buffering --> Full: queue size reaches SO_RCVBUF
+    Full --> Drop: kernel drops newest datagram
+    Full --> Healthy: app reads faster than send rate
+    Drop --> Healthy: app drains queue
