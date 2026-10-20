@@ -114,10 +114,10 @@ Mục đích: phủ các câu người phỏng vấn có thể hỏi quanh chủ
 
 Mỗi bài chỉ có một file Markdown. Không tạo file `.html` cho bài viết.
 
-1. Tạo `<Thư mục>/<slug>.md` từ `_template/article.template.md`: điền `{{TITLE}}`, `{{SUMMARY}}`, `{{TOPIC_TITLE}}`, `{{DATE}}`.
-2. Viết từng phần. Mỗi lần ghi không quá khoảng 50 dòng hoặc 4.000 ký tự; phần dài thì dùng placeholder tạm `{{MORE}}` rồi xóa khi xong.
+1. Tạo `<Thư mục>/<slug>.md` từ `_template/article.template.md`: điền `{% raw %}{{TITLE}}{% endraw %}`, `{% raw %}{{SUMMARY}}{% endraw %}`, `{% raw %}{{TOPIC_TITLE}}{% endraw %}`, `{% raw %}{{DATE}}{% endraw %}`.
+2. Viết từng phần. Mỗi lần ghi không quá khoảng 50 dòng hoặc 4.000 ký tự; phần dài thì dùng placeholder tạm `{% raw %}{{MORE}}{% endraw %}` rồi xóa khi xong.
 3. Sau mỗi lần ghi, đọc lại hoặc đếm kích thước file. Lệnh ghi báo thành công không chứng minh nội dung đúng.
-4. Cuối cùng tìm `{{` và `@@` trong file. Còn là chưa xong.
+4. Cuối cùng tìm `{% raw %}{{{% endraw %}` và `@@` trong file. Còn là chưa xong.
 5. Đếm từ từng phần, so với khoảng ở mục 3. Vượt trần thì cắt, dưới sàn thì bổ sung nội dung thật.
 6. Chạy `node tools/build-md.js` để sinh `<slug>.md.js`. Trang `reader.html?p=<Folder>/<slug>` dùng file này để render Markdown (marked, DOMPurify, Mermaid đã vendor trong `assets/vendor/`, không dùng CDN). Sửa `.md` thì chạy lại lệnh này.
 
@@ -182,7 +182,7 @@ Quy tắc viết Mermaid:
 ### 9.1. Checklist
 
 - [ ] Có `<slug>.md` đúng thư mục topic và không có `<slug>.html`. `registry.js` có entry và `node --check registry.js` không lỗi.
-- [ ] Không còn `{{` hoặc `@@` trong file.
+- [ ] Không còn `{% raw %}{{{% endraw %}` hoặc `@@` trong file.
 - [ ] Phần 3 có đủ `### 3A.` và `### 3B.`. Số `<details class="qa">` bằng số `</details>`.
 - [ ] Mỗi sơ đồ là một khối ```mermaid có chú thích, khối code đóng đủ.
 - [ ] Đủ 5 phần, số từ nằm trong khoảng (đã đếm, không ước đoán).
@@ -192,5 +192,4 @@ Quy tắc viết Mermaid:
 ### 9.2. Phản hồi trong chat
 
 Chỉ gồm: đường dẫn file `.md`, 3-5 ý cốt lõi, số từ từng phần, điểm không chắc, những gì chưa kiểm tra.
-
 
