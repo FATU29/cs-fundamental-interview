@@ -1,131 +1,249 @@
 # What happens when you type google.com in a browser?
 
-> Bài này trả lời theo đúng thứ tự thời gian: trình duyệt hiểu địa chỉ, tìm IP, mở kết nối, xác thực HTTPS, gửi HTTP request, nhận dữ liệu và vẽ trang. Mỗi bước có một giải thích ngắn trước khi đi vào từ khóa interview.
+> Bài này đi từ luồng tổng thể tới từng packet: browser hiểu URL, DNS tìm IP, máy tìm MAC của gateway, router NAT gói tin, TCP/QUIC mở kết nối, TLS bảo vệ dữ liệu, Google xử lý request và browser vẽ pixel.
 
 Chủ đề: Networking · Ngày: 2026-10-15
 
 ## 0. Nền tảng trước khi đọc
 
-**Bối cảnh:** Browser là ứng dụng ở phía client. Google là server ở phía bên kia Internet. Giữa hai bên có DNS, router, TCP hoặc QUIC, TLS và HTTP.
+**Bối cảnh:** Browser chạy trên máy người dùng, còn Google chạy trong nhiều data center. Một request phải đi qua nhiều lớp: ứng dụng, transport, IP, link layer rồi mới tới server.
 
-**Nói đơn giản:** Tên `google.com` chỉ dễ nhớ với người. Máy phải đổi tên đó thành IP, mở một kênh liên lạc an toàn, gửi request, nhận HTML rồi biến HTML thành pixel trên màn hình.
+**Nói đơn giản:** Browser biết tên `google.com`, nhưng mạng cần IP. Máy gửi packet tới router nhà mình, router đổi địa chỉ private thành public, server nhận request HTTPS rồi trả HTML về.
 
-**Từ khóa cần biết:** `DNS` = dịch tên miền thành IP; `TLS` = mã hóa và xác thực kết nối; `HTTP` = quy tắc request/response giữa browser và server.
+**Từ khóa cần biết:** `IP` = địa chỉ logic để định tuyến; `MAC` = địa chỉ của thiết bị trong mạng gần nhất; `port` = số giúp OS chuyển packet cho đúng process.
 
-**Ví dụ dễ hình dung:** Với trang đặt hàng, browser cũng làm gần như vậy: tìm IP của API, mở HTTPS, gửi `GET /orders`, nhận JSON rồi hiển thị danh sách đơn.
+**Ví dụ dễ hình dung:** Khi gọi API đặt hàng, laptop cũng gửi packet từ IP private qua NAT, tới IP server, mở HTTPS rồi nhận JSON. Chỉ phần payload và hostname khác với Google.
 
-**Cách học bài này:** Nhớ 8 bước ở phần 1 trước. Khi interviewer chọn một bước để đào sâu, dùng phần 2 và các câu hỏi ở phần 3 để trả lời.
+**Cách học bài này:** Dùng bộ thông số minh họa bên dưới để theo dõi một packet. Trong interview, nói rõ đây là ví dụ; IP, port, route và giao thức thực tế có thể khác.
 
 ## 1. Là gì
 
 ### Đọc nhanh trước khi đi sâu
 
-**Ý chính:** Một lần gõ URL đi qua parse, DNS, kết nối TCP hoặc QUIC, TLS, HTTP, server, trình duyệt và nhiều lớp cache.
+**Ý chính:** Browser đổi hostname thành IP, đóng gói packet qua gateway/NAT, mở TCP/QUIC + TLS, gửi HTTP và biến response thành pixel.
 
-**Ví dụ interview:** Browser tra DNS, tìm route, mở connection, tải HTML rồi tiếp tục tải CSS, JavaScript và ảnh.
+**Ví dụ interview:** Hãy theo một DNS packet và một TCP SYN: source/destination IP, MAC của next hop, port và NAT đổi gì ở từng chặng.
 
-**Luồng 4 bước:**
+**Luồng 4 bước:** URL/HSTS → DNS + ARP → NAT + TCP/QUIC + TLS → HTTP + rendering.
 
-1. Browser parse `google.com`, chọn HTTPS và kiểm tra HSTS/cache.
-2. DNS đổi tên miền thành IP; OS chọn route và tìm MAC của gateway nếu cần.
-3. Browser mở TCP + TLS, hoặc QUIC nếu dùng HTTP/3, rồi gửi HTTP GET.
-4. Google trả HTML; browser parse DOM/CSS, tải resource, layout và vẽ pixel.
+**Nói như trong interview:** Nói luồng này trước; nếu interviewer muốn packet-level deep dive, dùng bộ thông số giả định và các bảng ở phần 2.
 
-**Nói như trong interview:** Một lần gõ URL đi qua parse, DNS, kết nối TCP hoặc QUIC, TLS, HTTP, server, trình duyệt và nhiều lớp cache. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Luồng thời gian**, rồi nêu trade-off và failure mode ở các phần sau.
+### Câu trả lời 30 giây
+
+“Khi gõ `google.com` và nhấn Enter, browser phân tích chuỗi thành hostname và chọn HTTPS, thường nhờ HSTS hoặc chính sách HTTPS-first. Browser tìm IP qua cache DNS; nếu cache miss, OS gửi DNS query tới recursive resolver. Vì IP DNS ở ngoài mạng nhà, OS gửi frame tới MAC của default gateway; router NAT IP private và port nguồn thành public IP và port khác rồi chuyển packet ra Internet. Có IP Google, browser mở TCP bằng SYN, SYN-ACK, ACK hoặc dùng QUIC/HTTP/3, sau đó TLS 1.3 xác thực certificate và tạo session key. Browser gửi HTTP GET, Google edge/load balancer chuyển request tới backend và trả HTML. Browser parse DOM/CSSOM, layout, paint và composite để hiện pixel.”
+
+Sau phần tóm tắt, có thể hỏi: **“Anh/chị muốn em đi sâu vào DNS packet, NAT/TCP, TLS hay browser rendering?”**
+
+### Bộ thông số giả định để theo dõi packet
+
+Các giá trị dưới đây chỉ để minh họa một lần chạy, không phải giá trị cố định:
+
+| Thành phần | Giá trị minh họa |
+|---|---|
+| Laptop | `192.168.1.15/24`, MAC `AA:AA:AA:11:11:11` |
+| Wi-Fi router LAN | `192.168.1.1`, MAC `BB:BB:BB:22:22:22` |
+| Public IP sau NAT | `113.161.72.10` |
+| DNS resolver | `8.8.8.8` |
+| IP Google | `142.250.199.14` (có thể thay đổi) |
+| IPv6 Google | `2404:6800:4005:80a::200e` (chỉ là ví dụ) |
+| HTTPS port | `443` |
+
+### Luồng 5 giai đoạn
+
+| Giai đoạn | Câu hỏi cần trả lời | Kết quả |
+|---|---|---|
+| 1. Browser | Chuỗi người dùng gõ nghĩa là gì? | Host `google.com`, scheme HTTPS, path `/` |
+| 2. DNS | Tên miền đổi thành IP thế nào? | A/AAAA record |
+| 3. Packet | Packet tới router và Internet ra sao? | MAC gateway, IP route, NAT |
+| 4. Connection | Hai phía mở kênh tin cậy/an toàn thế nào? | TCP + TLS hoặc QUIC |
+| 5. Application | Server và browser làm gì tiếp? | HTTP response rồi render pixel |
+
+```mermaid
+flowchart LR
+    U["Enter"] --> B["Browser: URL + HSTS"]
+    B --> D["DNS: hostname → IP"]
+    D --> N["ARP/NDP + route + NAT"]
+    N --> T["TCP/QUIC + TLS"]
+    T --> H["HTTP GET"]
+    H --> G["Google edge/backend"]
+    G --> R["HTML → DOM/CSSOM → pixel"]
+```
+
+*Sơ đồ vị trí: mỗi lớp thêm thông tin riêng vào dữ liệu trước khi gửi xuống lớp thấp hơn.*
 
 ## 2. Cơ chế cốt lõi
 
-### Luồng thời gian
+### Giai đoạn 1 — Browser xử lý URL và HSTS
+
+Khi nhấn Enter, bàn phím gửi event qua USB/Bluetooth hoặc bộ điều khiển tích hợp. OS nhận event bằng hardware interrupt, kernel chuyển nó thành `keydown`/`keyup` và gửi tới cửa sổ browser đang active. Đây là chi tiết OS; không cần mở đầu bằng nó nếu interviewer chỉ hỏi network flow.
+
+Browser quyết định `google.com` là hostname chứ không phải từ khóa tìm kiếm, tạo path mặc định `/` và chọn HTTPS theo policy của browser/site. Nếu không có policy nâng cấp, scheme mặc định về mặt lịch sử là `http`; với site đã có HSTS hoặc browser dùng HTTPS-first, browser chuyển thẳng sang HTTPS trước khi gửi packet. URL sau khi parse có thể nhìn như sau:
+
+```text
+scheme: https
+host:   google.com
+port:   443 (mặc định của HTTPS)
+path:   /
+query:  rỗng
+```
+
+Nếu hostname nằm trong HSTS preload list, browser không gửi request HTTP tới port 80 trước. Nó chuyển nội bộ sang `https://google.com` port 443, tránh lần request đầu bị SSL stripping. HSTS preload chỉ nói browser phải dùng HTTPS; certificate vẫn phải được server cung cấp và browser xác minh.
+
+### Giai đoạn 2 — DNS: từ hostname tới IP
+
+#### 2.1. Kiểm tra cache trong máy
+
+Browser có thể có host cache. Nếu miss, nó gọi resolver của OS (thường qua `getaddrinfo()`); OS kiểm tra `hosts` và DNS cache của mình. Nếu máy được cấu hình dùng router `192.168.1.1` làm DNS forwarder, query dừng ở router trước: router trả từ cache hoặc chuyển tiếp lên ISP/public resolver. Nếu máy hỏi thẳng `8.8.8.8` như ví dụ bên dưới thì router chỉ làm NAT và forwarding. Một browser có thể dùng DoH/DoT hoặc resolver riêng, nên không phải mọi implementation đều đi đúng cùng một đường.
+
+#### 2.2. Đóng gói DNS query và tìm gateway
+
+Giả sử browser, OS và router đều cache miss, còn OS hỏi thẳng `8.8.8.8`. Query có thể minh họa như sau:
+
+```text
+Ethernet/Wi-Fi: src=AA:AA:AA:11:11:11, dst=BB:BB:BB:22:22:22
+IPv4:           src=192.168.1.15, dst=8.8.8.8
+UDP:            src=51000, dst=53
+DNS Question:   QNAME=google.com, QTYPE=A (và có thể AAAA), RD=1
+```
+
+Port `51000` chỉ là ephemeral port minh họa; OS chọn port khác ở lần khác. DNS thường dùng UDP vì query nhỏ và không cần connection handshake; response lớn hoặc bị truncate có thể chuyển TCP, DoT hoặc DoH tùy cấu hình.
+
+OS dùng subnet `/24` để nhận ra `8.8.8.8` không nằm trong `192.168.1.0/24`. Vì vậy frame Ethernet/Wi-Fi đầu tiên phải gửi tới **MAC của gateway**, không phải MAC của DNS server.
+
+Nếu ARP cache chưa có entry, laptop broadcast:
+
+```text
+ARP Request: Ai có 192.168.1.1? Hãy trả lời 192.168.1.15.
+ARP Reply:   192.168.1.1 ở MAC BB:BB:BB:22:22:22.
+```
+
+Frame sau đó có MAC source `AA:AA:AA:11:11:11`, MAC destination `BB:BB:BB:22:22:22`, còn IP bên trong vẫn là `192.168.1.15 → 8.8.8.8`.
+
+#### 2.3. Router NAT và recursive resolver
+
+Router bóc header link layer, thấy source là IP private và thực hiện SNAT. Ví dụ minh họa:
+
+```text
+LAN:  192.168.1.15:51000 → 8.8.8.8:53
+WAN:  113.161.72.10:61000 → 8.8.8.8:53
+NAT table: UDP 61000 ↔ 192.168.1.15:51000
+```
+
+Router giữ mapping để response quay về đúng process trong laptop. Google Public DNS nhận **public IP của router**, không thấy `192.168.1.15`.
+
+Nếu `8.8.8.8` chưa có cache, recursive resolver tự hỏi theo cây DNS. Có thể mô tả ba lượt như sau:
+
+1. **Root (`.`):** resolver hỏi nơi quản lý `.com`. Root không trả IP của Google; nó trả referral tới nameserver của TLD `.com` (có thể kèm glue record).
+2. **TLD `.com`:** resolver hỏi tiếp nameserver authoritative của `google.com`, ví dụ các `ns*.google.com`. TLD cũng thường trả referral chứ không trả web server IP cuối cùng.
+3. **Authoritative của `google.com`:** server này đọc DNS zone và trả record `A` hoặc `AAAA`, ví dụ `A google.com 300 IN A 142.250.199.14` trong một lần minh họa.
+
+Resolver cache record theo TTL rồi gửi response về `113.161.72.10:61000`; router dịch ngược NAT và giao response cho `192.168.1.15:51000`.
+
+Một trace minh họa có thể trông như sau: root trả referral tới nameserver của `.com`; TLD `.com` trả nameserver authoritative của `google.com` (ví dụ các `ns*.google.com`); authoritative trả `A google.com 300 IN A 142.250.199.14`. Tên nameserver, IP và TTL là dữ liệu có thể thay đổi; không nên học thuộc một địa chỉ như sự thật vĩnh viễn.
+
+Điểm cần nói cho đúng: đường root → TLD → authoritative chỉ xảy ra khi các cache miss. IP, TTL và authoritative server thực tế có thể thay đổi.
+
+Sau khi resolver trả lời, DNS response quay về qua cùng nguyên tắc: public destination `113.161.72.10:61000`, router tra NAT table để đổi thành `192.168.1.15:51000`, rồi frame trong LAN có destination MAC `AA:AA:AA:11:11:11`. Browser nhận một hoặc nhiều địa chỉ A/AAAA; việc chọn IPv4 hay IPv6 còn phụ thuộc reachability và Happy Eyeballs của implementation.
+
+Ở Internet, router không giữ MAC của laptop. Mỗi router thay link-layer header cho hop kế tiếp, còn IP packet được định tuyến qua nhiều mạng. BGP quảng bá các prefix; Anycast cho phép nhiều edge site dùng cùng một địa chỉ và BGP đưa traffic tới một site phù hợp theo policy/topology, không nhất thiết là site gần nhất theo khoảng cách địa lý.
+
+### Giai đoạn 3 — TCP connection và 4-tuple
+
+Sau khi có IP, browser gọi `socket()` và `connect()` tới port 443. TCP connection được nhận diện bởi 4-tuple minh họa:
+
+```text
+src IP: 192.168.1.15       src port: 52400
+dst IP: 142.250.199.14     dst port: 443
+```
+
+Trên đường ra Internet, NAT lại đổi source thành `113.161.72.10:62400`. Server Google nhìn thấy public tuple này. Port `52400/62400` là ví dụ, không phải số bắt buộc.
+
+NAT giữ mapping riêng cho connection TCP này; mapping DNS UDP ở trên là một entry khác. Hai flow có thể có cùng private source nhưng khác protocol hoặc port. Router cũng có firewall state để chỉ cho response quay vào khi nó khớp một mapping đã được tạo.
+
+#### TCP three-way handshake
+
+1. **SYN:** client từ `CLOSED` sang `SYN_SENT`, gửi `SEQ=x` và options như MSS, window scale, SACK permitted.
+2. **SYN-ACK:** server ở `LISTEN` trả `SEQ=y`, `ACK=x+1`, thường giữ state bán kết nối trong SYN queue.
+3. **ACK:** client trả `SEQ=x+1`, `ACK=y+1`, chuyển sang `ESTABLISHED`; server nhận ACK và đưa connection vào accept queue.
+
+Giá trị `x` và `y` là số 32-bit được chọn theo cách khó đoán; có thể minh họa `x=1000`, `y=5000`: SYN-ACK xác nhận `ACK=1001`, còn ACK cuối xác nhận `ACK=5001`. MSS thường khoảng 1460 byte trên Ethernet MTU 1500, nhưng còn tùy MTU và options. Window scale cho phép receive window lớn hơn 65,535 byte; SACK giúp bên nhận báo chính xác các block đã nhận khi có packet mất.
+
+Server có thể dùng SYN cookies khi SYN queue bị flood: thay vì giữ state cho mọi SYN, server mã hóa thông tin cần thiết vào sequence number rồi chỉ cấp state đầy đủ sau ACK hợp lệ. Đây là cơ chế chống SYN flood, không phải bước bắt buộc của mọi connection bình thường.
 
 ```mermaid
 sequenceDiagram
-    participant B as Browser
-    participant R as DNS resolver
+    participant C as Client/NAT
     participant S as Google edge
-    participant A as Application
-    B->>B: Parse URL, kiểm tra HSTS và cache
-    B->>R: Query A/AAAA nếu DNS cache miss
-    R-->>B: IP của google.com
-    B->>S: TCP handshake hoặc QUIC handshake
-    B->>S: TLS ClientHello + SNI + key share
-    S-->>B: Certificate + server key share + Finished
-    B->>S: HTTP GET /
-    S->>A: Chuyển request tới backend phù hợp
-    A-->>S: HTML/redirect + headers
-    S-->>B: HTTP response
-    B->>B: Parse, tải resource, layout, paint
+    C->>S: SYN seq=x
+    S-->>C: SYN-ACK seq=y, ack=x+1
+    C->>S: ACK seq=x+1, ack=y+1
+    Note over C,S: ESTABLISHED
 ```
 
-*Sơ đồ tuần tự: DNS, kết nối, TLS, HTTP và rendering xảy ra theo chuỗi; các resource phụ có thể tải song song sau khi browser thấy chúng.*
+*Sơ đồ TCP: ba packet giúp hai phía xác nhận đường đi hai chiều và đồng bộ sequence number.*
 
-### Bước 1 — Browser hiểu điều người dùng gõ
+HTTP/3 dùng QUIC trên UDP. QUIC tự quản lý reliability, congestion control và stream, đồng thời gộp transport handshake với TLS; có thể 1-RTT hoặc 0-RTT khi resume. Browser có thể quay về HTTP/2 nếu UDP bị chặn.
 
-Browser phải phân biệt đây là URL hay từ khóa tìm kiếm. Với `google.com`, nó tạo host `google.com` và path `/`; scheme thường được nâng lên `https` theo chính sách của browser, HSTS và redirect của site.
+### Giai đoạn 4 — TLS 1.3 bảo vệ HTTPS
 
-HSTS preload là danh sách host mà browser biết trước là chỉ được dùng HTTPS. HSTS giúp tránh request HTTP đầu tiên bị kẻ đứng giữa đổi hướng, nhưng không thay thế việc server cấu hình certificate đúng.
+ClientHello chứa phiên bản TLS hỗ trợ, cipher suites như `TLS_AES_128_GCM_SHA256`, client random, SNI `google.com`, ALPN như `h2`/`h3` và ECDHE key share (thường X25519 hoặc P-256). SNI cần thiết vì một IP/load balancer có thể phục vụ nhiều hostname và cần biết certificate nào để gửi.
 
-### Bước 2 — DNS đổi tên thành địa chỉ IP
+Server chọn tham số, gửi ServerHello, key share, EncryptedExtensions, certificate chain, CertificateVerify và Finished. Từ ServerHello trở đi, phần lớn handshake đã được mã hóa bằng handshake keys. Browser kiểm tra hostname trong SAN, thời hạn, key usage và chuỗi chữ ký tới Root CA tin cậy trong trust store. Nếu kiểm tra fail, browser dừng trước khi gửi HTTP và hiện lỗi certificate.
 
-Browser có thể tìm thấy IP trong host cache. Nếu không có, nó gọi resolver của OS; OS kiểm tra cache và file `hosts`, rồi gửi query tới recursive resolver (ISP, công ty hoặc public resolver như `1.1.1.1`).
+Hai bên dùng ECDHE để tính cùng session key mà không gửi secret trên mạng. Sau Finished, HTTP headers, cookie và body được bảo vệ bằng AEAD như AES-GCM hoặc ChaCha20-Poly1305. TLS 1.3 full handshake thường thêm 1 RTT sau TCP; session resumption có thể dùng PSK, còn 0-RTT giảm latency nhưng request có side effect có thể bị replay. TLS bảo vệ đường truyền và xác thực server; nó không tự xác thực tài khoản Google.
 
-Nếu recursive resolver cũng cache miss, nó hỏi theo cây DNS: root chỉ tới TLD `.com`, TLD chỉ tới authoritative server của `google.com`, authoritative trả A (IPv4) hoặc AAAA (IPv6). Resolver cache kết quả theo TTL rồi trả IP cho browser.
+### Giai đoạn 5 — HTTP, backend và rendering
 
-**Điểm interview:** không phải mọi request đều đi root → TLD → authoritative. Đó là đường khi các cache đều miss; cache hit thường chỉ tốn một lần hỏi resolver hoặc không tốn network round-trip nào.
+Browser gửi request HTTP/2 hoặc HTTP/3. Trên HTTP/2/3, không nên mô tả trên dây như text line đơn giản; hãy nói tới pseudo-headers như `:method`, `:path`, `:scheme`, `:authority` và binary frames. Request có thể kèm `User-Agent`, `Accept`, `Accept-Encoding: br, gzip, zstd` và cookie. HTTP/2 nén header bằng HPACK; HTTP/3 dùng QPACK trên QUIC.
 
-### Bước 3 — OS chọn đường ra mạng
+Ở mức logic, request có thể mô tả như sau (không có nghĩa các dòng này nằm nguyên văn trên wire HTTP/2/3):
 
-OS dùng routing table để chọn interface và next hop. Nếu server ở ngoài LAN, frame đầu tiên đi tới default gateway, không đi thẳng tới MAC của Google.
+```http
+GET / HTTP/2
+Host: google.com
+User-Agent: <browser>
+Accept: text/html,application/xhtml+xml
+Accept-Encoding: br, gzip, zstd
+Cookie: <nếu có>
+```
 
-Nếu chưa biết MAC của gateway, IPv4 dùng ARP; IPv6 dùng Neighbor Discovery (NDP). Đây là bước trong mạng nội bộ, khác với DNS: ARP tìm **MAC của next hop**, còn DNS tìm **IP của host**.
+Packet đi tới edge gần đó theo routing/BGP/Anycast. Google edge/load balancer có thể terminate TLS, kiểm tra abuse/cache rồi chuyển request tới backend. Tên như GFE hoặc Maglev là implementation detail; chỉ khẳng định khi biết deployment tương ứng. Response có thể là `200` hoặc `301` tùy deployment, kèm `Content-Type`, `Content-Encoding`, `Cache-Control`, `Strict-Transport-Security`, `Alt-Svc` và HTML. Nếu là 301 sang hostname khác, browser sẽ tạo request mới; connection có thể được reuse nếu origin và policy cho phép.
 
-### Bước 4 — Mở kênh vận chuyển
+Một response logic có thể là:
 
-Với HTTP/1.1 hoặc HTTP/2, browser mở TCP bằng SYN → SYN-ACK → ACK, tốn một RTT. Với HTTP/3, QUIC chạy trên UDP nhưng tự cung cấp reliability, congestion control và nhiều stream; nó gộp transport handshake với TLS để giảm số RTT.
+```http
+HTTP/2 200
+content-type: text/html; charset=UTF-8
+content-encoding: br
+cache-control: private, max-age=0
+strict-transport-security: max-age=31536000
+```
 
-QUIC không phải lúc nào cũng nhanh hơn. 0-RTT chỉ dùng được khi browser có thông tin phiên trước đó và request an toàn để replay; mạng chặn UDP có thể khiến browser quay về HTTP/2.
+Nếu server trả `301`, response có `Location: https://www.google.com/`; đây là behavior phụ thuộc deployment, không phải bước bắt buộc của DNS hay TLS.
 
-### Bước 5 — TLS bảo vệ kết nối
+Browser giải nén và parse HTML thành DOM: bytes → characters → tokens → nodes. Preload scanner chạy song song để tìm CSS, JavaScript, font và image. Browser tạo CSSOM, ghép DOM + CSSOM thành render tree; `display:none` bị loại khỏi render tree, còn `visibility:hidden` vẫn chiếm layout space.
 
-Browser gửi ClientHello, trong đó có phiên bản TLS, cipher suites, SNI (`google.com`), ALPN (`h2` hoặc `h3`) và key share. Server chọn tham số, gửi certificate chain, chữ ký `CertificateVerify` và `Finished`.
+Sau đó browser làm **layout/reflow** để tính width, height, x, y; **paint/rasterization** để tạo chữ, màu, border và shadow; rồi **composite** các layer theo z-index, thường có compositor/GPU hỗ trợ. Script không `async`/`defer` có thể chặn HTML parser; CSS thường chặn render đầu tiên để tránh vẽ giao diện chưa có style. JavaScript engine như V8 có thể chạy script và tạo thêm layout/paint sau lần render đầu; ví dụ script đặt focus vào ô tìm kiếm hoặc làm con trỏ trong ô nhấp nháy.
 
-Browser kiểm tra hostname, thời hạn và chữ ký certificate tới một Root CA được tin cậy. Hai bên dùng ECDHE để tạo session key; sau handshake, headers, cookie và body HTTP được mã hóa. TLS xác thực server và bảo vệ dữ liệu trên đường truyền, nhưng không tự đăng nhập user.
+### Packet-level checklist khi interview
 
-### Bước 6 — Browser gửi HTTP request
+| Lớp | Cần nói gì | Ví dụ |
+|---|---|---|
+| Application | DNS question hoặc HTTP request | `A google.com`, `GET /` |
+| Transport | Port, handshake, reliability | UDP/53, TCP/443, QUIC |
+| Network | Source/destination IP, route | `192.168.1.15 → 8.8.8.8` |
+| Link | MAC của next hop | laptop MAC → gateway MAC |
+| NAT | Mapping private/public tuple | `51000 ↔ 61000` |
 
-Request thường có method `GET`, path `/`, authority/host, `User-Agent`, `Accept`, `Accept-Encoding` và cookie phù hợp. HTTP/2 và HTTP/3 truyền các trường này trong binary frames/pseudo-headers; không nên nói request line trên dây luôn là text `GET / HTTP/2`.
+Không cần đọc thuộc mọi packet. Hãy dùng một packet để chứng minh nguyên tắc: MAC thay đổi theo từng hop gần nhất, IP định tuyến end-to-end nhưng NAT có thể rewrite source, port chọn process, còn TLS bảo vệ payload.
 
-Browser có thể dùng connection pool, nên request tiếp theo không cần lặp lại TCP và TLS. Redirect `301` sang host khác là một response hợp lệ nhưng có thể buộc browser thực hiện thêm DNS/kết nối/TLS.
+### Con số và cách debug
 
-### Bước 7 — Edge và backend xử lý request
-
-Request tới edge hoặc reverse proxy của Google. Hạ tầng có thể làm TLS termination, chống abuse, chọn backend, kiểm tra cache và trả response. Tên thành phần cụ thể như GFE, Maglev hay cấu trúc backend là chi tiết implementation; trong interview chỉ nêu khi interviewer hỏi về hạ tầng Google.
-
-Response có status như `200` hoặc `301`, headers như `Content-Type`, `Content-Encoding`, `Cache-Control`, `Strict-Transport-Security`, rồi body HTML. Không nên khẳng định luôn là `200`: behavior `google.com` → `www.google.com` phụ thuộc deployment và thời điểm.
-
-### Bước 8 — Browser biến response thành pixel
-
-Browser nhận byte và parse HTML thành DOM. Preload scanner có thể phát hiện CSS, JavaScript, font và image để tải song song. CSSOM được tạo từ CSS; DOM + CSSOM tạo render tree.
-
-Sau đó browser tính kích thước/vị trí (**layout**), rasterize chữ và hình (**paint**), rồi ghép các layer (**composite**, thường có GPU hỗ trợ). JavaScript không có `async`/`defer` có thể chặn HTML parser; CSS có thể chặn lần render đầu để tránh vẽ trang chưa có style.
-
-### Con số cần nói có điều kiện
-
-| Đoạn | Bậc độ lớn | Điều kiện |
-|---|---:|---|
-| Browser/OS cache | dưới 1 ms đến vài ms | cache hit trong RAM |
-| DNS khi resolver cache miss | khoảng 10–200 ms | phụ thuộc RTT và số cache miss |
-| TCP handshake | 1 RTT | connection mới |
-| TLS 1.3 | khoảng 1 RTT sau TCP | full handshake, không reuse |
-| HTTP response | vài ms đến hàng trăm ms | edge hit hay phải đi origin |
-| Render | phụ thuộc HTML/CSS/JS | thiết bị và kích thước trang |
-
-Đây là các bậc độ lớn để giải thích trade-off, không phải SLA cố định của Google. Muốn biết nguyên nhân thật phải đo bằng DevTools waterfall, `curl -w`, browser performance panel hoặc tracing.
-
-### Cách debug khi trang không tải
-
-1. `dig google.com` — kiểm tra DNS có trả A/AAAA hay không.
-2. `curl -sS -o /dev/null -w 'dns:%{time_namelookup} connect:%{time_connect} tls:%{time_appconnect} ttfb:%{time_starttransfer} total:%{time_total}\n' https://google.com` — tách thời gian DNS, connect, TLS và byte đầu tiên.
-3. DevTools Network — xem redirect, status, TTFB, resource bị block và lỗi certificate; chỉ dùng `tcpdump`/`openssl s_client` khi cần xuống tầng packet/TLS.
+- DNS cache hit thường dưới vài ms; recursive cache miss có thể khoảng 10–200 ms tùy RTT và số cache miss.
+- TCP handshake tốn 1 RTT; TLS 1.3 full handshake thường thêm khoảng 1 RTT sau TCP.
+- DNS: `dig google.com` hoặc `dig +trace google.com` để phân biệt cache hit và đường phân cấp.
+- Timing: `curl -sS -o /dev/null -w 'dns:%{time_namelookup} connect:%{time_connect} tls:%{time_appconnect} ttfb:%{time_starttransfer} total:%{time_total}\n' https://google.com`.
+- Packet: dùng `tcpdump`/Wireshark khi cần nhìn ARP, SYN, retransmission; không kỳ vọng đọc plaintext HTTPS nếu chưa có session keys.
 
 ## 3. Câu hỏi phỏng vấn
 
