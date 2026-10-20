@@ -4,30 +4,36 @@
 
 Chủ đề: Concurrency · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nhiều việc cùng chạy trong một chương trình. Khó ở chỗ các việc có thể chạm cùng dữ liệu và làm kết quả sai nếu không phối hợp.
+
+**Nói đơn giản:** Synchronous I/O khiến luồng chờ kết quả; asynchronous I/O cho phép luồng làm việc khác trong lúc thiết bị hoặc mạng xử lý.
+
+**Từ khóa cần biết:** thread = luồng chạy; shared state = dữ liệu dùng chung; synchronization = cách phối hợp luồng.
+
+**Ví dụ dễ hình dung:** Trong lúc chờ database trả kết quả, server async có thể xử lý request khác; server sync giữ thread chờ ở lệnh đọc.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Synchronous I/O là mô hình mà thread gọi một thao tác I/O (đọc file, gửi network) phải chờ cho đến khi thao tác hoàn tất hoặc lỗi trước khi nhận kết quả và tiếp tục. Trong thời gian chờ, thread không làm gì khác. Asynchronous I/O là mô hình thread gửi yêu cầu rồi nhận về ngay (không chờ), tiếp tục xử lý công việc khác; khi I/O xong, kết quả được đưa về qua callback, future/promise, event hoặc signal.
+### Đọc nhanh trước khi đi sâu
 
-Phân biệt thêm: blocking vs non-blocking ở mức syscall. Blocking syscall (read, write, recv) đặt thread vào trạng thái sleep cho đến khi kernel có dữ liệu. Non-blocking syscall trả về ngay với EAGAIN nếu chưa có dữ liệu; thread phải poll hoặc dùng cơ chế thông báo (epoll, kqueue, IOCP). Asynchronous I/O thường dùng non-blocking syscall kết hợp event notification; synchronous I/O thường dùng blocking syscall.
+**Ý chính:** Synchronous I/O khiến luồng chờ kết quả; asynchronous I/O cho phép luồng làm việc khác trong lúc thiết bị hoặc mạng xử lý.
 
-```mermaid
-flowchart LR
-    subgraph "Synchronous I/O"
-        T1["Thread<br/>gọi read()"] --> W1["sleep<br/>chờ data"]
-        W1 --> D1["data sẵn sàng<br/>return"]
-    end
-    subgraph "Asynchronous I/O"
-        T2["Thread<br/>gọi aio_read()"] --> R1["return ngay<br/>làm việc khác"]
-        R1 --> N["kernel báo<br/>data sẵn sàng"]
-        N --> H["xử lý data"]
-    end
-```
+**Ví dụ interview:** Trong lúc chờ database trả kết quả, server async có thể xử lý request khác; server sync giữ thread chờ ở lệnh đọc.
 
-*Sơ đồ vị trí: sync I/O block thread cho đến khi data; async I/O trả thread về ngay, kernel báo khi xong.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Có nhiều task cùng chạy.
+2. Các task chạm vào dữ liệu hoặc tài nguyên chung.
+3. Chương trình dùng message passing, atomic hoặc lock để phối hợp.
+4. Task tiếp tục và kết quả không bị mất, trùng hoặc kẹt.
 
-"Sync I/O block thread trong khi chờ kernel xử lý I/O; thread không làm gì khác. Async I/O trả thread về ngay, làm việc khác, kernel báo khi xong. Trên OS: blocking syscall (read) đặt thread vào sleep; non-blocking syscall (read với O_NONBLOCK) trả EAGAIN; true async I/O (io_uring trên Linux 5.1+, IOCP trên Windows) yêu cầu kernel xử lý và báo qua completion event. Trên application: Node.js dùng libuv (epoll/kqueue/IOCP); Python asyncio tương tự; Go runtime dùng goroutine + netpoller; Java NIO dùng Selector + CompletionHandler. Sync đơn giản, dễ debug; Async scale tốt với hàng nghìn connection nhưng code khó đọc và blocking call trong async chặn cả event loop."
+**Nói như trong interview:** Synchronous I/O khiến luồng chờ kết quả; asynchronous I/O cho phép luồng làm việc khác trong lúc thiết bị hoặc mạng xử lý. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Kernel xử lý I/O như thế nào**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

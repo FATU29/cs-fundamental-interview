@@ -4,26 +4,36 @@
 
 Chủ đề: Operating Systems · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Lớp phần mềm quản lý CPU, bộ nhớ, tiến trình và thiết bị. Ứng dụng gọi OS thay vì tự điều khiển phần cứng trực tiếp.
+
+**Nói đơn giản:** CPU scheduling quyết định task nào được chạy tiếp. Mỗi chính sách cân bằng khác nhau giữa độ phản hồi, công bằng và throughput.
+
+**Từ khóa cần biết:** process = chương trình đang chạy; thread = luồng thực thi; kernel = phần lõi có quyền điều khiển máy.
+
+**Ví dụ dễ hình dung:** Round-robin chia mỗi process một time slice; FCFS để process đến trước chạy trước nhưng process dài có thể làm request ngắn chờ.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Lập lịch CPU chọn process nào chạy tiếp khi CPU rảnh. FCFS (First-Come, First-Served) xếp hàng theo thứ tự đến, không preempt (một process giữ CPU đến khi xong hoặc tự nhường cho I/O). Round-Robin (RR) cũng xếp hàng theo thứ tự đến nhưng preempt theo quantum (vd 4-100 ms): chạy đủ quantum thì đưa về cuối hàng. SJF (Shortest-Job-First, còn gọi SJN) chọn process có burst time (thời gian CPU cần) ngắn nhất, có thể preempt (SRTF) hoặc không.
+### Đọc nhanh trước khi đi sâu
 
-```mermaid
-flowchart LR
-    Q["Ready Queue"] --> S["Scheduler"]
-    S -->|FCFS| R1["P1 đến trước chạy trước"]
-    S -->|RR| R2["Mỗi P chạy tối đa quantum"]
-    S -->|SJF| R3["P có burst ngắn nhất"]
-    R1 --> C["CPU"]
-    R2 --> C
-    R3 --> C
-```
+**Ý chính:** CPU scheduling quyết định task nào được chạy tiếp. Mỗi chính sách cân bằng khác nhau giữa độ phản hồi, công bằng và throughput.
 
-*Sơ đồ vị trí: scheduler đọc ready queue và chọn một process theo policy (FCFS / RR / SJF) rồi dispatch lên CPU.*
+**Ví dụ interview:** Round-robin chia mỗi process một time slice; FCFS để process đến trước chạy trước nhưng process dài có thể làm request ngắn chờ.
 
-### Trả lời 30 giây
+**Luồng 4 bước:**
 
-"FCFS xếp hàng theo thứ tự đến, chạy đến khi xong hoặc nhường do I/O, không preempt — dễ implement nhưng một process dài có thể khiến process ngắn chờ lâu (convoy effect). Round-Robin cũng xếp theo thứ tự đến nhưng chia thời gian thành quantum (10-100 ms), preempt theo clock tick, đưa về cuối hàng — fair, response time tốt cho hệ tương tác. SJF chọn burst ngắn nhất, tối ưu average waiting time nhưng cần dự đoán burst và dễ gây starvation cho process dài. Linux CFS dùng weighted fair queueing (red-black tree theo vruntime) chứ không dùng RR thuần; Round-Robin vẫn thấy trong hệ thời gian thực mềm và trong lý thuyết phỏng vấn OS."
+1. Ready queue chứa các process/thread đang chờ CPU.
+2. Scheduler chọn task theo chính sách như FCFS hoặc Round-Robin.
+3. Task chạy đến khi xong, block I/O hoặc hết time slice.
+4. Scheduler chọn task kế tiếp và cân bằng response time, throughput, fairness.
+
+**Nói như trong interview:** CPU scheduling quyết định task nào được chạy tiếp. Mỗi chính sách cân bằng khác nhau giữa độ phản hồi, công bằng và throughput. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Mô hình process và burst time**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

@@ -4,34 +4,38 @@
 
 Chủ đề: Networking · Ngày: 2026-10-15
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách trình duyệt, ứng dụng và máy chủ gửi dữ liệu cho nhau. Mỗi bước có giao thức, độ trễ và kiểu lỗi riêng.
+
+**Nói đơn giản:** CDN đặt bản sao nội dung ở nhiều điểm gần người dùng, giảm quãng đường mạng và giảm tải server gốc.
+
+**Từ khóa cần biết:** client = bên gửi request; server = bên phục vụ; packet = mảnh dữ liệu đi qua mạng.
+
+**Ví dụ dễ hình dung:** Ảnh sản phẩm được trả từ edge gần người mua thay vì đi xuyên về origin ở một khu vực khác.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-CDN (Content Delivery Network) là mạng lưới server phân tán theo địa lý (PoP — Point of Presence), nằm giữa client và origin server, chịu trách nhiệm phân phối nội dung tới người dùng cuối. Ba cơ chế cải thiện hiệu năng chính:
-
-1. **Rút ngắn khoảng cách vật lý** — edge PoP gần người dùng hơn origin, giảm RTT từ hàng trăm ms (xuyên đại dương) xuống hàng chục ms. Đây là ràng buộc vật lý không thể thương lượng.
-2. **Cache ở edge** — biến nhiều request lặp lại thành một lần truy cập origin. Với cache hit ratio >90%, origin chỉ chịu ~10% traffic thực.
-3. **Tối ưu kết nối** — TLS termination ở edge, connection reuse tới origin, TCP initcwnd lớn, BBR congestion control, HTTP/3 0-RTT.
-
-Một CDN hiện đại còn cung cấp image optimization, Brotli compression, HTTP/2-3, dynamic acceleration và edge compute. Bài này tập trung vào hiệu năng.
-
-Giả định: bài nói về HTTP/HTTPS, không đi sâu vào CDN cho live video (HLS/DASH) hay game download.
-
-```mermaid
-flowchart TD
-  CL["Client<br/>trình duyệt, app"] --> DNS["DNS của CDN<br/>anycast hoặc GeoDNS<br/>trả IP edge gần nhất"]
-  DNS --> EDGE["Edge PoP<br/>TLS termination<br/>cache RAM/SSD<br/>edge compute"]
-  EDGE -->|"cache hit"| CL
-  EDGE -->|"cache miss"| SH["Origin shield<br/>gộp request cùng URL"]
-  SH -->|"miss"| ORI["Origin<br/>web server, object storage"]
-  ORI --> SH
-  SH --> EDGE
-```
-
-*Sơ đồ: CDN nằm giữa client và origin; edge trả cache hit, miss đi qua shield rồi mới chạm origin.*
-
-**Trả lời 30 giây:** "CDN cải thiện hiệu năng bằng cách đặt nội dung gần người dùng hơn. Tốc độ ánh sáng trong sợi quang ~200.000 km/s nên RTT xuyên đại dương tối thiểu ~150 ms — không phần mềm nào sửa được. CDN đặt edge ở 200+ PoP toàn cầu, mỗi PoP gần một nhóm user, RTT còn ~5-30 ms. Đồng thời, CDN cache response ở edge, với cache hit ratio >90%, origin chỉ phục vụ ~10% request thực sự. Cuối cùng, TLS termination ở edge giảm 1 RTT handshake cho client."
 
 ## 2. Cơ chế cốt lõi
+### Đọc nhanh trước khi đi sâu
+
+**Ý chính:** CDN đặt bản sao nội dung ở nhiều điểm gần người dùng, giảm quãng đường mạng và giảm tải server gốc.
+
+**Ví dụ interview:** Ảnh sản phẩm được trả từ edge gần người mua thay vì đi xuyên về origin ở một khu vực khác.
+
+**Luồng 4 bước:**
+
+1. Ứng dụng tạo request với tên host, port và dữ liệu.
+2. OS và các giao thức mạng tìm đường rồi chuyển packet tới server.
+3. Server xử lý request và trả response qua kết nối phù hợp.
+4. Client kiểm tra response, cache hoặc render dữ liệu cho người dùng.
+
+**Nói như trong interview:** CDN đặt bản sao nội dung ở nhiều điểm gần người dùng, giảm quãng đường mạng và giảm tải server gốc. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Đọc nhanh trước khi đi sâu**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ### 2.1. DNS routing tới PoP gần nhất
 

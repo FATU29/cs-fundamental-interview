@@ -4,26 +4,36 @@
 
 Chủ đề: OOP - Design Patterns · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách tổ chức code thành những đối tượng dễ thay đổi. Mục tiêu là giữ luật của nghiệp vụ rõ ràng và tránh code phụ thuộc chặt vào nhau.
+
+**Nói đơn giản:** Observer cho phép một subject báo cho nhiều listener khi state thay đổi mà subject không cần biết chi tiết listener làm gì.
+
+**Từ khóa cần biết:** class = khuôn; object = instance cụ thể; method = hành vi mà object cung cấp.
+
+**Ví dụ dễ hình dung:** OrderCreated phát cho email, analytics và warehouse listener mà OrderService không gọi cứng từng dependency.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Observer là pattern thuộc nhóm behavioral trong GoF, định nghĩa quan hệ một-nhiều giữa subject và observer: khi subject thay đổi trạng thái, tất cả observer đã đăng ký được thông báo tự động. Subject giữ reference tới observer qua một interface chung; observer không cần biết subject cụ thể, và ngược lại. Pattern này còn được gọi là Publish-Subscribe ở dạng phân tán, hoặc Event Listener trong GUI framework.
+### Đọc nhanh trước khi đi sâu
 
-```mermaid
-flowchart LR
-    S["Subject<br/>(state)"]
-    O1["Observer A"]
-    O2["Observer B"]
-    O3["Observer C"]
-    S -- notify --> O1
-    S -- notify --> O2
-    S -- notify --> O3
-```
+**Ý chính:** Observer cho phép một subject báo cho nhiều listener khi state thay đổi mà subject không cần biết chi tiết listener làm gì.
 
-*Sơ đồ vị trí: một Subject ở trung tâm giữ trạng thái, nhiều Observer đăng ký và nhận notify khi state thay đổi. Subject không biết chi tiết Observer; Observer không cần biết Subject cụ thể.*
+**Ví dụ interview:** OrderCreated phát cho email, analytics và warehouse listener mà OrderService không gọi cứng từng dependency.
 
-### Trả lời 30 giây
+**Luồng 4 bước:**
 
-"Observer pattern giải quyết quan hệ một-nhiều khi một object thay đổi thì nhiều object khác cần phản ứng, mà vẫn giữ loosely coupled. Subject giữ list observers, mỗi observer implement cùng interface (thường là `update()`). Khi state thay đổi, subject gọi `notify()` duyệt list gọi `update()` trên từng cái. Ví dụ: stock ticker notify UI, loggers, alert system khi giá thay đổi. Trong Java có sẵn `java.util.Observer` (deprecated) và `PropertyChangeListener`; trong JavaScript dùng EventTarget / EventEmitter; trong C# có event/delegate; trong reactive framework (RxJava, Reactor) là nền tảng. Nhớ cảnh báo quan trọng: memory leak nếu subject giữ observer quá lâu sau khi observer đã 'chết' (vì GUI), và race condition nếu notify trong multi-thread."
+1. Client gọi một contract dễ hiểu.
+2. Object hoặc pattern chọn code thực hiện phía sau contract.
+3. State và dependency được giữ ở nơi có trách nhiệm rõ ràng.
+4. Khi requirement đổi, thay implementation mà giảm ảnh hưởng tới client.
+
+**Nói như trong interview:** Observer cho phép một subject báo cho nhiều listener khi state thay đổi mà subject không cần biết chi tiết listener làm gì. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Thành phần và interface chuẩn GoF**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

@@ -4,32 +4,36 @@
 
 Chủ đề: Database · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nơi ứng dụng lưu dữ liệu và đọc lại dữ liệu. Khó ở chỗ dữ liệu phải đúng khi nhiều người cùng đọc, ghi, hoặc khi máy bị lỗi.
+
+**Nói đơn giản:** WAL ghi mô tả thay đổi vào log trước khi ghi page dữ liệu. Nếu máy crash, database đọc log để phục hồi.
+
+**Từ khóa cần biết:** row = một dòng dữ liệu; query = câu hỏi gửi database; transaction = một nhóm thay đổi được xử lý cùng nhau.
+
+**Ví dụ dễ hình dung:** Server crash ngay sau khi trả COMMIT; WAL cho phép database dựng lại thay đổi chưa kịp ghi vào data file.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Write-ahead log (WAL) là quy tắc storage engine ghi mọi thay đổi vào một file log **trước** khi thay đổi được áp dụng vào data file chính. Khi commit, chỉ cần đảm bảo log đã flush xuống disk; data file có thể cập nhật sau. Nếu crash giữa chừng, recovery dùng log để tái hiện thay đổi chưa được flush (redo) và hủy thay đổi của transaction chưa commit (undo).
+### Đọc nhanh trước khi đi sâu
 
-WAL là nền tảng để đảm bảo thuộc tính **D** (Durability) và **A** (Atomicity) của ACID trong PostgreSQL, MySQL InnoDB, Oracle, SQL Server (gọi là transaction log). Mỗi engine gọi tên khác — InnoDB gọi redo log, PostgreSQL dùng WAL files trong `pg_wal/`, Oracle gọi redo log — nhưng nguyên tắc giống nhau.
+**Ý chính:** WAL ghi mô tả thay đổi vào log trước khi ghi page dữ liệu. Nếu máy crash, database đọc log để phục hồi.
 
-```mermaid
-flowchart TD
-    App["Application<br/>(commit)"]
-    Buffer["Buffer pool<br/>(dirty pages)"]
-    WAL["WAL / redo log<br/>(sequential append,<br/>fsync trước COMMIT)"]
-    Data["Data files<br/>(heap, btree, indexes)"]
-    Disk["Disk / SSD"]
-    App -->|UPDATE| Buffer
-    Buffer -.checkpoint.-> Data
-    WAL -->|redo<br/>on recovery| Data
-    Buffer --> WAL
-    WAL --> Disk
-    Data --> Disk
-```
+**Ví dụ interview:** Server crash ngay sau khi trả COMMIT; WAL cho phép database dựng lại thay đổi chưa kịp ghi vào data file.
 
-*Sơ đồ vị trí: UPDATE sửa buffer pool (in-memory); engine ghi WAL ngay (sequential append + fsync) để đảm bảo durability. Checkpoint sau đó flush dirty pages từ buffer pool ra data files. Recovery: nếu crash, đọc WAL, replay phần chưa flush.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Ứng dụng gửi query qua driver hoặc connection pool.
+2. Database engine tìm dữ liệu, kiểm tra constraint và xử lý transaction.
+3. Engine dùng index, lock/MVCC và log tùy loại thao tác.
+4. Kết quả được trả về; thay đổi chỉ bền vững sau COMMIT.
 
-"WAL là quy tắc bắt buộc ghi thay đổi vào log trước khi áp dụng vào data file. Khi commit, engine chỉ cần fsync log xuống disk; không cần flush data file. Nếu crash, recovery dùng log để redo các thay đổi đã commit nhưng chưa flush, và undo các thay đổi của transaction chưa commit. InnoDB dùng redo log + undo log + checkpoint; PostgreSQL dùng WAL files (mặc định 16 MB, lưu tại `pg_wal/`) cho cả crash recovery và replication streaming. Lợi ích chính: ghi log tuần tự (sequential) nhanh hơn ghi data file ngẫu nhiên (random) — đổi cái nào fsync nhiều thành ít, cải thiện throughput. WAL cũng là nguồn cho point-in-time recovery và replication streaming."
+**Nói như trong interview:** WAL ghi mô tả thay đổi vào log trước khi ghi page dữ liệu. Nếu máy crash, database đọc log để phục hồi. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Tại sao cần WAL: fsync data file quá đắt**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

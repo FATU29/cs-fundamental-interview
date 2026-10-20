@@ -4,39 +4,36 @@
 
 Chủ đề: Distributed Systems · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nhiều máy cùng phục vụ một hệ thống. Khó ở chỗ mạng có thể chậm hoặc đứt, máy có thể hỏng, nhưng người dùng vẫn cần kết quả hợp lý.
+
+**Nói đơn giản:** Monolith triển khai một khối; microservices tách thành nhiều service. Tách service đổi sự đơn giản lấy khả năng triển khai độc lập và chi phí vận hành.
+
+**Từ khóa cần biết:** node = một máy hoặc tiến trình; network failure = mạng chậm/đứt; consistency = các nơi nhìn dữ liệu giống nhau tới mức nào.
+
+**Ví dụ dễ hình dung:** Team nhỏ có thể deploy monolith đơn giản; khi checkout và catalog cần scale độc lập, microservices có thể phù hợp hơn.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Monolith là một ứng dụng duy nhất: một codebase, một tiến trình (hoặc vài tiến trình cùng binary), một cơ sở dữ liệu. Mọi tính năng (user, order, payment, search) gói chung và deploy cùng nhau. Microservices là tập các service nhỏ, độc lập: mỗi service một codebase, deploy riêng, có data riêng (database-per-service), giao tiếp qua mạng (HTTP/REST, gRPC, message queue).
-    10|
-Lát cắt hay bị hỏi nhất trong phỏng vấn: khi nào monolith tốt hơn, khi nào microservices vượt trội, và đánh đổi thật giữa hai phía (operational cost, data consistency, team velocity). Câu trả lời mặc định trong ngành: bắt đầu bằng modular monolith, tách service khi có áp lực thật (scale team, scale deploy, scale một phần tính năng).
+### Đọc nhanh trước khi đi sâu
 
-```mermaid
-flowchart LR
-    subgraph Monolith
-        MA["App server<br/>(một binary)"]
-        MD[("Database<br/>(một)")]
-        MA --> MD
-    end
-    subgraph Microservices
-        SA["Service A<br/>(deploy riêng)"]
-        SB["Service B<br/>(deploy riêng)"]
-        SC["Service C<br/>(deploy riêng)"]
-        SA -.HTTP / gRPC / MQ.-> SB
-        SA -.HTTP / gRPC / MQ.-> SC
-        SAD[("DB A")]
-        SBD[("DB B")]
-        SCD[("DB C")]
-        SA --> SAD
-        SB --> SBD
-        SC --> SCD
-    end
-```
+**Ý chính:** Monolith triển khai một khối; microservices tách thành nhiều service. Tách service đổi sự đơn giản lấy khả năng triển khai độc lập và chi phí vận hành.
 
-*Sơ đồ vị trí: monolith là một hộp đơn lẻ chứa toàn bộ business logic và DB; microservices là tập các service nhỏ, mỗi cái có DB riêng, liên lạc qua mạng.*
+**Ví dụ interview:** Team nhỏ có thể deploy monolith đơn giản; khi checkout và catalog cần scale độc lập, microservices có thể phù hợp hơn.
 
-### Trả lời 30 giây
+**Luồng 4 bước:**
 
-"Monolith là một binary duy nhất chứa mọi tính năng, deploy nguyên khối, một DB chung. Microservices là tập service độc lập, mỗi service có codebase, deploy và DB riêng, giao tiếp qua mạng. Microservices có lợi thế về deploy độc lập, scale từng phần, team ownership rõ; nhưng trả giá bằng network latency (mỗi call xuyên service +1-5 ms cùng DC), distributed transaction phức tạp (phải dùng saga thay 2PC), vận hành nặng hơn (N pipeline, N dashboard, N on-call). Thực tế: phần lớn công ty bắt đầu bằng monolith (kể cả Amazon, Shopify, GitHub), tách service khi team > 50 engineers hoặc một phần cần scale riêng. Câu trả lời an toàn nhất: chọn theo team size và điểm nghẽn, không theo số năm kinh nghiệm."
+1. Client gửi request tới một node hoặc gateway.
+2. Node gọi các node khác qua mạng và có thể gặp timeout hoặc retry.
+3. Hệ thống chọn cách giữ trạng thái đồng bộ và xử lý lỗi.
+4. Client nhận kết quả hoặc lỗi có thể retry an toàn.
+
+**Nói như trong interview:** Monolith triển khai một khối; microservices tách thành nhiều service. Tách service đổi sự đơn giản lấy khả năng triển khai độc lập và chi phí vận hành. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Monolith — đơn vị deploy là toàn bộ app**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

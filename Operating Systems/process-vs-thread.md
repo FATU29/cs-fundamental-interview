@@ -4,29 +4,36 @@
 
 Chủ đề: Operating Systems · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Lớp phần mềm quản lý CPU, bộ nhớ, tiến trình và thiết bị. Ứng dụng gọi OS thay vì tự điều khiển phần cứng trực tiếp.
+
+**Nói đơn giản:** Process có không gian địa chỉ riêng; thread là luồng chạy bên trong process và thường chia sẻ bộ nhớ với các thread cùng process.
+
+**Từ khóa cần biết:** process = chương trình đang chạy; thread = luồng thực thi; kernel = phần lõi có quyền điều khiển máy.
+
+**Ví dụ dễ hình dung:** Process cô lập crash và bộ nhớ; thread nhẹ hơn và chia sẻ dữ liệu nhanh nhưng một lỗi nghiêm trọng có thể làm cả process chết.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Process là instance của một chương trình đang chạy, có address space riêng (user VMA), file descriptor table riêng, signal handler riêng, credentials (uid, gid), namespace. Mỗi process có ít nhất một thread (main thread) và là đơn vị OS cấp phát tài nguyên.
+### Đọc nhanh trước khi đi sâu
 
-Thread là light-weight execution unit bên trong process. Nhiều thread cùng process chia sẻ address space, fd table, signal handler, mmap, code segment; mỗi thread có stack riêng, thanh ghi riêng (RIP, RSP, RBP), TLS riêng, và program counter riêng. Thread là đơn vị được CPU schedule.
+**Ý chính:** Process có không gian địa chỉ riêng; thread là luồng chạy bên trong process và thường chia sẻ bộ nhớ với các thread cùng process.
 
-Trên Linux, sự khác biệt giữa process và thread mờ hơn so với Windows: cả hai đều là `task_struct`. Điểm khác là cờ `clone()`: `fork()` tạo process mới bằng `clone(CLONE_NONE)` (copy address space); `pthread_create` tạo thread bằng `clone(CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD)`. Chia sẻ càng nhiều flag, hai task càng giống thread.
+**Ví dụ interview:** Process cô lập crash và bộ nhớ; thread nhẹ hơn và chia sẻ dữ liệu nhanh nhưng một lỗi nghiêm trọng có thể làm cả process chết.
 
-```mermaid
-flowchart LR
-    P1["Process A"] --> T1["Thread 1<br/>(stack, regs riêng)"]
-    P1 --> T2["Thread 2<br/>(stack, regs riêng)"]
-    P2["Process B"] --> T3["Thread 1"]
-    P2 --> T4["Thread 2"]
-    P1 -.->|"IPC: pipe, socket, shm"| P2
-    T1 -.->|"chia sẻ VMA, fd"| T2
-```
+**Luồng 4 bước:**
 
-*Sơ đồ vị trí: mỗi process có address space riêng; thread cùng process chia sẻ address space, stack riêng. Process giao tiếp qua IPC; thread giao tiếp qua shared memory trong VMA.*
+1. OS tạo một process với address space và tài nguyên riêng.
+2. Process tạo thread; các thread cùng process chia sẻ memory nhưng có stack và register riêng.
+3. Scheduler chọn thread nào chạy trên CPU.
+4. Process cô lập lỗi tốt hơn; thread nhẹ hơn nhưng phải đồng bộ shared state.
 
-### Trả lời 30 giây
-
-"Process là đơn vị tài nguyên với address space riêng (VMA), fd table riêng, signal handler riêng. Thread là đơn vị thực thi với stack riêng, thanh ghi riêng, nhưng chia sẻ address space với thread khác cùng process. Trên Linux, cả hai đều là `task_struct`; phân biệt bằng `clone()` flags: `fork()` tạo process (copy mọi thứ), `pthread_create` tạo thread (chia sẻ VMA, fd, signals). Trên Windows, process có kernel object khác thread. Trong Python (CPython), thread bị GIL giữ, phù hợp I/O-bound; multiprocessing cho CPU-bound. Trong Java, thread là native thread 1:1, JVM không thêm layer. Tạo process tốn vài ms (copy page table, fork), tạo thread tốn vài chục µs."
+**Nói như trong interview:** Process có không gian địa chỉ riêng; thread là luồng chạy bên trong process và thường chia sẻ bộ nhớ với các thread cùng process. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Cấu trúc task_struct trên Linux**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

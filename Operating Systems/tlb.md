@@ -4,25 +4,36 @@
 
 Chủ đề: Operating Systems · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Lớp phần mềm quản lý CPU, bộ nhớ, tiến trình và thiết bị. Ứng dụng gọi OS thay vì tự điều khiển phần cứng trực tiếp.
+
+**Nói đơn giản:** TLB là cache nhỏ trong MMU, lưu ánh xạ từ địa chỉ ảo sang địa chỉ vật lý để CPU không phải đọc page table mỗi lần.
+
+**Từ khóa cần biết:** process = chương trình đang chạy; thread = luồng thực thi; kernel = phần lõi có quyền điều khiển máy.
+
+**Ví dụ dễ hình dung:** CPU truy cập cùng một mảng nhiều lần và TLB hit giúp bỏ qua bước đọc page table lặp lại.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-TLB (Translation Lookaside Buffer) là cache phần cứng nằm trong Memory Management Unit (MMU) của CPU, lưu các ánh xạ gần đây từ virtual page number (VPN) sang physical page number (PPN). Khi CPU sinh địa chỉ ảo, MMU tra TLB trước; hit (~95-99% trong workload thông thường) thì dịch sang physical address trong 1-2 cycles; miss thì CPU walk page table trong RAM, tốn vài chục đến vài trăm nanosecond.
+### Đọc nhanh trước khi đi sâu
 
-```mermaid
-flowchart LR
-    V["Virtual Address<br/>(VA)"] --> M["MMU"]
-    M --> TLB["TLB<br/>(cache ~64-1536 entries)"]
-    TLB -->|hit| PA["Physical Address<br/>(1-2 cycles)"]
-    TLB -->|miss| PT["Page Table<br/>walk in RAM<br/>~10-100 ns/level"]
-    PT --> PA
-    PA --> L1["L1 cache"]
-```
+**Ý chính:** TLB là cache nhỏ trong MMU, lưu ánh xạ từ địa chỉ ảo sang địa chỉ vật lý để CPU không phải đọc page table mỗi lần.
 
-*Sơ đồ vị trí: MMU tra TLB trước khi rẽ vào page table. TLB hit đi thẳng tới cache; miss kéo theo page walk bộ nhớ chính.*
+**Ví dụ interview:** CPU truy cập cùng một mảng nhiều lần và TLB hit giúp bỏ qua bước đọc page table lặp lại.
 
-### Trả lời 30 giây
+**Luồng 4 bước:**
 
-"TLB là cache phần cứng trong MMU lưu gần đây các ánh xạ virtual page → physical page. TLB hit ~1-2 cycles, miss buộc page walk qua page table trong RAM, tốn ~10-100 ns mỗi level trên x86-64. TLB thường có 64-1536 entries, fully-associative, write-back. Mỗi entry có VPN, PPN, valid bit, dirty bit, ASID (Address Space ID) cho context switch không flush. Trên multiprocessor, khi một CPU thay đổi page table phải gửi TLB shootdown IPI cho các CPU khác — đây là nguồn latency lớn trong workload nhiều process."
+1. CPU cần dịch virtual address sang physical address.
+2. MMU kiểm tra TLB trước vì đây là cache của các mapping gần đây.
+3. TLB hit trả frame nhanh; TLB miss buộc MMU hoặc kernel đi đọc page table.
+4. Mapping mới được đưa vào TLB; multiprocessor có thể cần TLB shootdown khi mapping đổi.
+
+**Nói như trong interview:** TLB là cache nhỏ trong MMU, lưu ánh xạ từ địa chỉ ảo sang địa chỉ vật lý để CPU không phải đọc page table mỗi lần. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Virtual address và page number**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

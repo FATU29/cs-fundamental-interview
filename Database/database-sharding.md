@@ -4,25 +4,36 @@
 
 Chủ đề: Database · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nơi ứng dụng lưu dữ liệu và đọc lại dữ liệu. Khó ở chỗ dữ liệu phải đúng khi nhiều người cùng đọc, ghi, hoặc khi máy bị lỗi.
+
+**Nói đơn giản:** Sharding chia dữ liệu ra nhiều máy theo một khóa, ví dụ user_id, để một máy không phải chứa và xử lý tất cả.
+
+**Từ khóa cần biết:** row = một dòng dữ liệu; query = câu hỏi gửi database; transaction = một nhóm thay đổi được xử lý cùng nhau.
+
+**Ví dụ dễ hình dung:** Đơn của user 42 luôn vào shard theo user_id, nên nhiều máy có thể nhận traffic mà không tranh cùng một bảng.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Sharding là chiếm tách một tập dữ liệu lớn thành nhiều phần nhỏ hơn (shard) đặt trên nhiều node database độc lập, mỗi node chỉ chứa một tập con dữ liệu. Mục tiêu là vượt qua giới hạn của một server đơn (CPU, RAM, disk, IOPS) khi dữ liệu và traffic lớn hơn một máy có thể chịu. Mỗi shard có schema giống nhau (thường vậy), nhưng dữ liệu tách rời theo một hàm `shard_key → shard_id`. Khác với replication: replication giống dữ liệu trên nhiều node, còn sharding tách dữ liệu.
+### Đọc nhanh trước khi đi sâu
 
-```mermaid
-flowchart LR
-    App["Application"]
-    Router["Shard router<br/>(app-side, Vitess,<br/>proxy)"]
-    S1["Shard 1<br/>key range A-H"]
-    S2["Shard 2<br/>key range I-P"]
-    S3["Shard 3<br/>key range Q-Z"]
-    App --> Router --> S1 & S2 & S3
-```
+**Ý chính:** Sharding chia dữ liệu ra nhiều máy theo một khóa, ví dụ user_id, để một máy không phải chứa và xử lý tất cả.
 
-*Sơ đồ vị trí: Application gửi query tới đúng node dựa trên shard key; mỗi shard là một database độc lập, có thể khác server/region.*
+**Ví dụ interview:** Đơn của user 42 luôn vào shard theo user_id, nên nhiều máy có thể nhận traffic mà không tranh cùng một bảng.
 
-### Trả lời 30 giây
+**Luồng 4 bước:**
 
-"Sharding là tách một dataset lớn thành nhiều shard trên nhiều node để vượt qua giới hạn của một server (RAM, CPU, IOPS, disk). Shard key chọn sai dễ gây hot shard. Ba cách shard phổ biến: range (dễ truy vấn khoảng nhưng dễ hot), hash (phân tán đều nhưng khó range query), directory (bảng lookup linh hoạt nhưng thêm SPOF). Khác với replication (sao chép) và partitioning (tách bảng trong cùng một instance). Resharding dùng consistent hashing với virtual shard để giảm rewrite khi thêm/bớt node. Cross-shard query và transaction mất atomicity và cost cao — thiết kế schema để tránh."
+1. Ứng dụng chọn shard key từ request.
+2. Router/hash/range map key tới một shard.
+3. Shard xử lý query cục bộ; query không có key có thể fan-out nhiều shard.
+4. Rebalance và hot shard được theo dõi khi dữ liệu hoặc traffic tăng.
+
+**Nói như trong interview:** Sharding chia dữ liệu ra nhiều máy theo một khóa, ví dụ user_id, để một máy không phải chứa và xử lý tất cả. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Shard key**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

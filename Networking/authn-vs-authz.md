@@ -4,35 +4,36 @@
 
 Chủ đề: Networking · Ngày: 2026-10-15
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách trình duyệt, ứng dụng và máy chủ gửi dữ liệu cho nhau. Mỗi bước có giao thức, độ trễ và kiểu lỗi riêng.
+
+**Nói đơn giản:** Authentication trả lời 'bạn là ai'; authorization trả lời 'bạn được phép làm gì'. Đăng nhập thành công chưa có nghĩa là được đọc mọi dữ liệu.
+
+**Từ khóa cần biết:** client = bên gửi request; server = bên phục vụ; packet = mảnh dữ liệu đi qua mạng.
+
+**Ví dụ dễ hình dung:** Đăng nhập xác minh user là Alice; authorization mới quyết định Alice có được refund order của Bob hay không.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-### Định nghĩa
+### Đọc nhanh trước khi đi sâu
 
-Authentication (authn) là quá trình chứng minh danh tính: hệ thống kiểm tra bằng chứng (mật khẩu, chữ ký, token) để kết luận "request này đến từ principal P". Authorization (authz) là quá trình quyết định principal P có được thực hiện action A trên resource R hay không.
+**Ý chính:** Authentication trả lời 'bạn là ai'; authorization trả lời 'bạn được phép làm gì'. Đăng nhập thành công chưa có nghĩa là được đọc mọi dữ liệu.
 
-Hai câu hỏi độc lập về logic nhưng có thứ tự bắt buộc: authz cần một principal đã được xác thực. Authn đúng không kéo theo authz đúng — đây là gốc rễ của hầu hết sự cố rò rỉ dữ liệu trên API.
+**Ví dụ interview:** Đăng nhập xác minh user là Alice; authorization mới quyết định Alice có được refund order của Bob hay không.
 
-Giả định: bài này nói về API HTTP hiện đại (session cookie, OAuth 2.0/OIDC, JWT) trên nền tảng web và mobile. Không đi sâu vào Kerberos, SAML hay LDAP.
+**Luồng 4 bước:**
 
-### Vị trí trong hệ thống
+1. Ứng dụng tạo request với tên host, port và dữ liệu.
+2. OS và các giao thức mạng tìm đường rồi chuyển packet tới server.
+3. Server xử lý request và trả response qua kết nối phù hợp.
+4. Client kiểm tra response, cache hoặc render dữ liệu cho người dùng.
 
-```mermaid
-flowchart LR
-    C["Client<br/>(browser, mobile, API)"]
-    T["TLS/mTLS<br/>authn máy"]
-    G["API Gateway<br/>verify JWT<br/>rate limit"]
-    S["Service<br/>nạp resource<br/>kiểm quyền"]
-    D["Database<br/>(resource)"]
-    I["IdP<br/>(authn thật:<br/>password, MFA)"]
-    C --> T --> G --> S --> D
-    G -.-> I
-```
-
-*Authn xảy ra ở IdP; authz xảy ra ở service vì chỉ service biết ai sở hữu resource.*
-
-### Trả lời 30 giây
-
-"Authentication trả lời câu hỏi 'bạn là ai' bằng cách xác minh credential (mật khẩu, chữ ký, token) do Identity Provider phát hành. Authorization trả lời câu hỏi 'bạn được làm gì' bằng cách kiểm tra policy trên resource cụ thể. 401 nghĩa là chưa xác thực, 403 nghĩa là đã biết bạn là ai nhưng không cho phép. Hai câu hỏi này độc lập: token hợp lệ chỉ chứng minh danh tính, không chứng minh quyền trên resource."
+**Nói như trong interview:** Authentication trả lời 'bạn là ai'; authorization trả lời 'bạn được phép làm gì'. Đăng nhập thành công chưa có nghĩa là được đọc mọi dữ liệu. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Đăng nhập — session cookie**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

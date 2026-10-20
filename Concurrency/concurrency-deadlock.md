@@ -4,29 +4,36 @@
 
 Chủ đề: Concurrency · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nhiều việc cùng chạy trong một chương trình. Khó ở chỗ các việc có thể chạm cùng dữ liệu và làm kết quả sai nếu không phối hợp.
+
+**Nói đơn giản:** Deadlock là lúc các luồng chờ nhau mãi nên không luồng nào đi tiếp. Bài tập trung vào cách nhận ra vòng chờ và phá vòng đó.
+
+**Từ khóa cần biết:** thread = luồng chạy; shared state = dữ liệu dùng chung; synchronization = cách phối hợp luồng.
+
+**Ví dụ dễ hình dung:** Thread A giữ khóa đơn hàng rồi chờ khóa kho; thread B giữ khóa kho rồi chờ khóa đơn hàng. Cả hai đứng im vì chờ vòng tròn.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Deadlock là trạng thái hai hay nhiều goroutine/thread/process chờ lẫn nhau vì mỗi bên giữ tài nguyên mà bên kia cần, không bên nào nhả trước khi hoàn tất. Trong concurrency deadlock thường xuất hiện ở mutex, RWMutex, channel (gửi/nhận chéo), lock cấp process (`flock`), và condition variable chờ nhau sai thứ tự. Khác contention thường (chỉ chậm), deadlock khiến tất cả bên liên quan treo vĩnh viễn trừ khi có timeout hoặc detector bên ngoài.
+### Đọc nhanh trước khi đi sâu
 
-Bốn điều kiện Coffman phải đồng thời đúng: (1) mutual exclusion (tài nguyên không chia sẻ được), (2) hold-and-wait (giữ một khóa rồi xin thêm), (3) no preemption (không ai cướp khóa của ai), (4) circular wait (chuỗi chờ vòng tròn). Phá một trong bốn điều kiện là thoát deadlock; production thường phá điều kiện 4 (lock ordering) hoặc phá điều kiện 3 (tryLock + rollback).
+**Ý chính:** Deadlock là lúc các luồng chờ nhau mãi nên không luồng nào đi tiếp. Bài tập trung vào cách nhận ra vòng chờ và phá vòng đó.
 
-```mermaid
-flowchart LR
-    A["Goroutine/thread T1<br/>giữ mutex X"]
-    B["Goroutine/thread T2<br/>giữ mutex Y"]
-    X["mutex X"]
-    Y["mutex Y"]
-    A --> X
-    B --> Y
-    A -- "xin mutex Y (block)" --> B
-    B -- "xin mutex X (block)" --> A
-```
+**Ví dụ interview:** Thread A giữ khóa đơn hàng rồi chờ khóa kho; thread B giữ khóa kho rồi chờ khóa đơn hàng. Cả hai đứng im vì chờ vòng tròn.
 
-*Sơ đồ vị trí: hai goroutine mỗi bên giữ một mutex và chờ mutex của bên kia → chuỗi chờ vòng tròn, không ai tiến được.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Có nhiều task cùng chạy.
+2. Các task chạm vào dữ liệu hoặc tài nguyên chung.
+3. Chương trình dùng message passing, atomic hoặc lock để phối hợp.
+4. Task tiếp tục và kết quả không bị mất, trùng hoặc kẹt.
 
-"Deadlock cần đủ bốn điều kiện Coffman: mutual exclusion, hold-and-wait, no preemption, circular wait. Trong code Go/Java, deadlock hay gặp nhất là hai goroutine khóa hai mutex theo thứ tự ngược nhau: T1 lock(A) rồi lock(B), T2 lock(B) rồi lock(A) → circular. Cách giải phổ biến nhất là lock ordering: mọi nơi trong chương trình xin khóa theo cùng một thứ tự định trước (ví dụ theo địa chỉ con trỏ, theo ID), phá điều kiện 4. Cách thứ hai là tryLock/timeout: thử lấy khóa với timeout ngắn, thất bại thì nhả hết khóa đã giữ rồi thử lại (phá điều kiện 3). Cách thứ ba là redesign: thuật toán banker, dùng semaphore cho critical section dài, hoặc chuyển sang cấu trúc lock-free (atomic, CAS) khi có thể."
+**Nói như trong interview:** Deadlock là lúc các luồng chờ nhau mãi nên không luồng nào đi tiếp. Bài tập trung vào cách nhận ra vòng chờ và phá vòng đó. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Bốn điều kiện Coffman — chỉ phá một là đủ**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

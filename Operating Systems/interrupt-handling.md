@@ -4,29 +4,36 @@
 
 Chủ đề: Operating Systems · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Lớp phần mềm quản lý CPU, bộ nhớ, tiến trình và thiết bị. Ứng dụng gọi OS thay vì tự điều khiển phần cứng trực tiếp.
+
+**Nói đơn giản:** Interrupt tạm dừng luồng CPU hiện tại để báo một sự kiện như packet đến hoặc timer hết hạn, rồi kernel xử lý sự kiện đó.
+
+**Từ khóa cần biết:** process = chương trình đang chạy; thread = luồng thực thi; kernel = phần lõi có quyền điều khiển máy.
+
+**Ví dụ dễ hình dung:** Card mạng báo packet đến bằng interrupt; kernel xử lý phần gấp rồi đưa việc nặng sang bottom half.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Interrupt là sự kiện bất đồng bộ khiến CPU tạm dừng code đang chạy để xử lý việc khác. Có hai loại: hardware interrupt (IRQ từ NIC, disk controller, timer, keyboard, mouse) và software interrupt (lệnh `int n` từ user mode, hoặc `INT 0x80` cũ, hoặc trap exception như page fault, divide by zero). System call là một dạng software interrupt.
+### Đọc nhanh trước khi đi sâu
 
-Khi CPU nhận interrupt, nó lưu trạng thái hiện tại (RIP, thanh ghi, cờ) vào stack hoặc kernel structure, tra bảng vector (IDT trên x86-64, vector table trên AArch64) để tìm handler address, rồi nhảy tới handler. Handler chạy với IRQ line tương ứng bị tắt (mask), để tránh re-entry. Sau khi handler chạy xong, CPU khôi phục trạng thái và tiếp tục code.
+**Ý chính:** Interrupt tạm dừng luồng CPU hiện tại để báo một sự kiện như packet đến hoặc timer hết hạn, rồi kernel xử lý sự kiện đó.
 
-Top-half (IRQ handler) chỉ xử lý phần tối thiểu (đọc thanh ghi thiết bị, đánh dấu có dữ liệu), trả về nhanh. Bottom-half (tasklet, softirq, workqueue) xử lý phần nặng (xử lý gói tin, ghi disk) ở ngữ cảnh có thể sleep. Chia như vậy để thời gian tắt IRQ (IRQ disabled time) ngắn nhất có thể, tránh mất sự kiện từ thiết bị.
+**Ví dụ interview:** Card mạng báo packet đến bằng interrupt; kernel xử lý phần gấp rồi đưa việc nặng sang bottom half.
 
-```mermaid
-flowchart LR
-    HW["Hardware<br/>(NIC, disk, timer)"] -->|"IRQ line"| P["PIC / IOAPIC / MSI"]
-    P -->|"vector number"| C["CPU"]
-    C -->|"lookup IDT"| H["IRQ handler<br/>(top-half)"]
-    H -->|"deferred work"| B["Bottom-half<br/>(tasklet / softirq / workqueue)"]
-    H -->|"ack IRQ"| P
-    H -->|"iret"| C
-```
+**Luồng 4 bước:**
 
-*Sơ đồ vị trí: phần cứng gửi IRQ tới PIC/IOAPIC/MSI, controller gửi vector tới CPU, CPU tra IDT và gọi handler. Handler xử lý tối thiểu rồi ack cho controller, deferred work xử lý sau.*
+1. Thiết bị hoặc timer phát tín hiệu interrupt tới CPU.
+2. CPU lưu context tối thiểu và nhảy vào handler của kernel.
+3. Handler xử lý phần gấp rồi dời việc nặng sang bottom half/workqueue.
+4. Kernel đánh thức task chờ dữ liệu và khôi phục việc bị ngắt.
 
-### Trả lời 30 giây
-
-"Interrupt là tín hiệu bất đồng bộ từ phần cứng (NIC, disk, timer) hoặc phần mềm (syscall, page fault) báo CPU có việc cần xử lý. CPU lưu context, tra IDT (x86-64) hoặc vector table (AArch64) để tìm handler, nhảy tới handler. Handler chia hai phần: top-half xử lý tối thiểu trong IRQ context (không được sleep), bottom-half (softirq, tasklet, workqueue) xử lý nặng sau, có thể sleep. IRQ được mask trong khi handler chạy để tránh re-entry. Mỗi IRQ tốn microsecond để acknowledge. Linux dùng MSI/MSI-X cho NIC hiện đại thay PIC cũ. Sai lầm thường gặp: cho handler sleep hoặc làm việc nặng trong IRQ context, dẫn tới mất IRQ và treo hệ thống."
+**Nói như trong interview:** Interrupt tạm dừng luồng CPU hiện tại để báo một sự kiện như packet đến hoặc timer hết hạn, rồi kernel xử lý sự kiện đó. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Phần cứng gửi IRQ**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

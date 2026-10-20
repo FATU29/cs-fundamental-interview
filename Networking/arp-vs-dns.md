@@ -4,37 +4,36 @@
 
 Chủ đề: Networking · Ngày: 2026-10-15
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách trình duyệt, ứng dụng và máy chủ gửi dữ liệu cho nhau. Mỗi bước có giao thức, độ trễ và kiểu lỗi riêng.
+
+**Nói đơn giản:** DNS tìm IP từ tên miền; ARP tìm địa chỉ MAC của máy kế tiếp trong mạng nội bộ. Một request web thường cần cả hai.
+
+**Từ khóa cần biết:** client = bên gửi request; server = bên phục vụ; packet = mảnh dữ liệu đi qua mạng.
+
+**Ví dụ dễ hình dung:** DNS tìm IP của api.example.com; sau đó ARP tìm MAC của gateway để gói IP rời khỏi laptop.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-ARP (Address Resolution Protocol, RFC 826) ánh xạ IPv4 (32-bit) sang MAC (48-bit) trong một broadcast domain — thường là một VLAN. Không vượt router, chỉ hoạt động trong L2.
+### Đọc nhanh trước khi đi sâu
 
-DNS (Domain Name System, RFC 1034/1035) là cơ sở dữ liệu phân cấp toàn cầu, ánh xạ FQDN sang bản ghi (A, AAAA, MX, CNAME…) qua UDP/TCP cổng 53.
+**Ý chính:** DNS tìm IP từ tên miền; ARP tìm địa chỉ MAC của máy kế tiếp trong mạng nội bộ. Một request web thường cần cả hai.
 
-### Vị trí trong stack
+**Ví dụ interview:** DNS tìm IP của api.example.com; sau đó ARP tìm MAC của gateway để gói IP rời khỏi laptop.
 
-```mermaid
-flowchart TD
-  APP["Ứng dụng<br/>getaddrinfo, connect"]
-  STUB["Stub resolver, L7<br/>DNS: tên sang IP, UDP/TCP 53"]
-  REC["Recursive resolver<br/>root → TLD → authoritative"]
-  SOCK["Socket, TCP/UDP, L4"]
-  IP["IP, L3<br/>so subnet, chọn next hop"]
-  NB["ARP (IPv4) / NDP (IPv6)<br/>IP next-hop sang MAC, neighbor cache"]
-  ETH["Ethernet frame, L2<br/>chỉ trong một broadcast domain"]
+**Luồng 4 bước:**
 
-  APP --> STUB
-  STUB -.-> REC
-  APP --> SOCK
-  SOCK --> IP
-  IP --> NB
-  NB --> ETH
-```
+1. Ứng dụng tạo request với tên host, port và dữ liệu.
+2. OS và các giao thức mạng tìm đường rồi chuyển packet tới server.
+3. Server xử lý request và trả response qua kết nối phù hợp.
+4. Client kiểm tra response, cache hoặc render dữ liệu cho người dùng.
 
-*Sơ đồ: DNS chạy ở L7, xuyên Internet; ARP chạy ở L2, chỉ trong một VLAN.*
-
-### Trả lời 30 giây
-
-> ARP dịch IP sang MAC trong cùng một VLAN, dùng broadcast request + unicast reply, cache trong kernel ~30s REACHABLE rồi STALE. DNS dịch tên miền sang IP toàn cầu, dùng recursive query qua root/TLD/auth, cache theo TTL (60s–86400s). Một request HTTP cần cả hai: DNS lấy IP server, ARP lấy MAC của gateway hoặc đích trong subnet.
+**Nói như trong interview:** DNS tìm IP từ tên miền; ARP tìm địa chỉ MAC của máy kế tiếp trong mạng nội bộ. Một request web thường cần cả hai. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **2.1. ARP: IP → MAC trong một VLAN**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

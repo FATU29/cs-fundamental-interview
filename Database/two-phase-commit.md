@@ -4,28 +4,36 @@
 
 Chủ đề: Database · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nơi ứng dụng lưu dữ liệu và đọc lại dữ liệu. Khó ở chỗ dữ liệu phải đúng khi nhiều người cùng đọc, ghi, hoặc khi máy bị lỗi.
+
+**Nói đơn giản:** 2PC giúp nhiều database cùng commit một giao dịch, nhưng coordinator hỏng có thể làm các bên chờ lâu.
+
+**Từ khóa cần biết:** row = một dòng dữ liệu; query = câu hỏi gửi database; transaction = một nhóm thay đổi được xử lý cùng nhau.
+
+**Ví dụ dễ hình dung:** Một order cần ghi cả database order và database payment; coordinator phải biết cả hai đã prepare trước khi commit.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Two-phase commit (2PC) là giao thức đảm bảo một tập thay đổi trên nhiều resource (thường là nhiều cơ sở dữ liệu) được commit hoặc rollback nguyên tử với nhau. Khác với transaction một DB, 2PC có một coordinator điều phối các participant qua hai phase: Prepare (ghi ý định và ghi bền trạng thái "sẵn sàng") và Commit (áp dụng vĩnh viễn hoặc huỷ). Trong phase Prepare, mỗi participant trả lời YES (có thể commit) hoặc NO; nếu tất cả YES, coordinator ra lệnh Commit; nếu một NO, ra lệnh Rollback.
+### Đọc nhanh trước khi đi sâu
 
-2PC dùng khi cần atomic xuyên DB không thể giải bằng transaction một DB. Phổ biến: XA transaction (PostgreSQL/MySQL/InnoDB/Oracle/SQL Server đều hỗ trợ XA), `PREPARE TRANSACTION` của PostgreSQL, `XA START ... END` SQL chuẩn. Microservice hiện đại thường tránh 2PC vì độ trễ cao, coordinator là single point of failure, và lock kéo dài; thay bằng saga + outbox. Bài [distributed-transactions](../Distributed Systems/...) sẽ bàn sâu hơn; ở đây tập trung DB-side.
+**Ý chính:** 2PC giúp nhiều database cùng commit một giao dịch, nhưng coordinator hỏng có thể làm các bên chờ lâu.
 
-```mermaid
-flowchart LR
-    C["Coordinator<br/>(application hoặc<br/>transaction manager)"]
-    P1["Participant 1<br/>(DB A)"]
-    P2["Participant 2<br/>(DB B)"]
-    P3["Participant N<br/>(DB C)"]
-    C --> P1
-    C --> P2
-    C --> P3
-```
+**Ví dụ interview:** Một order cần ghi cả database order và database payment; coordinator phải biết cả hai đã prepare trước khi commit.
 
-*Sơ đồ vị trí: Coordinator điều phối N participant. Coordinator có thể là application process (Spring, Narayana) hoặc một node riêng (XA transaction manager).*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Ứng dụng gửi query qua driver hoặc connection pool.
+2. Database engine tìm dữ liệu, kiểm tra constraint và xử lý transaction.
+3. Engine dùng index, lock/MVCC và log tùy loại thao tác.
+4. Kết quả được trả về; thay đổi chỉ bền vững sau COMMIT.
 
-"Two-phase commit đảm bảo atomic cho một tập thay đổi trên nhiều cơ sở dữ liệu qua hai phase. Coordinator gửi PREPARE cho từng participant; participant ghi trạng thái 'prepared' xuống disk và trả YES/NO. Nếu tất cả YES, coordinator gửi COMMIT; nếu một NO hoặc timeout, coordinator gửi ROLLBACK. Trong PostgreSQL, `PREPARE TRANSACTION` tạo transaction ở trạng thái prepared; trong Java EE dùng XA qua JTA. Đánh đổi: 2PC tốn 2-3 RTT (Prepare + Commit), coordinator là SPOF (nếu crash sau Prepare, participant khoá ở trạng thái prepared không biết commit hay rollback), và lock held kéo dài gây contention. Microservice hiện đại thường dùng saga + outbox thay vì 2PC."
+**Nói như trong interview:** 2PC giúp nhiều database cùng commit một giao dịch, nhưng coordinator hỏng có thể làm các bên chờ lâu. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Phase 1: Prepare**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

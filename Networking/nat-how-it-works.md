@@ -4,30 +4,38 @@
 
 Chủ đề: Networking · Ngày: 2026-10-15
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách trình duyệt, ứng dụng và máy chủ gửi dữ liệu cho nhau. Mỗi bước có giao thức, độ trễ và kiểu lỗi riêng.
+
+**Nói đơn giản:** NAT đổi địa chỉ và cổng private thành địa chỉ public khi gói tin đi ra Internet, rồi đổi ngược khi phản hồi quay về.
+
+**Từ khóa cần biết:** client = bên gửi request; server = bên phục vụ; packet = mảnh dữ liệu đi qua mạng.
+
+**Ví dụ dễ hình dung:** Laptop 192.168.1.10:5000 được router đổi thành public_ip:62000 khi gọi API Internet.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-**Định nghĩa.** NAT là kỹ thuật router sửa địa chỉ (và thường cả cổng) nguồn hoặc đích trong header IP/TCP/UDP của gói tin khi chuyển tiếp, kèm cập nhật checksum. Dạng phổ biến nhất ở nhà và văn phòng là NAPT (còn gọi PAT, masquerade): nhiều host private dùng chung một IP public, phân biệt nhau bằng cổng nguồn.
-
-NAT là giải pháp thực dụng cho việc IPv4 cạn kiệt. Địa chỉ private theo RFC 1918: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`. NAT không phải tường lửa, dù hành vi mặc định (chặn kết nối đến chưa có entry) trông giống vậy.
-
-Giả định: bài này nói NAT44 (IPv4 sang IPv4) kiểu NAPT trên Linux/router gia đình. IPv6 không cần NAT cho mục đích tiết kiệm địa chỉ.
-
-```mermaid
-flowchart LR
-    H1["Host A<br/>192.168.1.10"]
-    H2["Host B<br/>192.168.1.11"]
-    R["NAT router<br/>inside: 192.168.1.1<br/>outside: 203.0.113.5"]
-    I(("Internet<br/>server 198.51.100.7:443"))
-    H1 --> R
-    H2 --> R
-    R -->|"src rewritten to<br/>203.0.113.5:port"| I
-```
-
-*Sơ đồ vị trí: nhiều host private đi ra Internet qua một router NAT, router viết lại địa chỉ nguồn thành IP public.*
-
-**Trả lời 30 giây.** NAT router giữ một bảng ánh xạ (private IP:port) sang (public IP:port). Gói đi ra: router tạo entry nếu chưa có, thay nguồn bằng IP public và một cổng mới. Gói trả về: router tra bảng theo cổng đích, viết lại đích về host private. Entry bị xóa khi hết thời gian idle (TCP established thường dài hơn UDP; giá trị cụ thể phụ thuộc thiết bị). Hệ quả: kết nối từ ngoài vào không có entry nên bị bỏ, đó là lý do cần port forwarding, STUN, hoặc relay.
 
 ## 2. Cơ chế cốt lõi
+### Đọc nhanh trước khi đi sâu
+
+**Ý chính:** NAT đổi địa chỉ và cổng private thành địa chỉ public khi gói tin đi ra Internet, rồi đổi ngược khi phản hồi quay về.
+
+**Ví dụ interview:** Laptop 192.168.1.10:5000 được router đổi thành public_ip:62000 khi gọi API Internet.
+
+**Luồng 4 bước:**
+
+1. Ứng dụng tạo request với tên host, port và dữ liệu.
+2. OS và các giao thức mạng tìm đường rồi chuyển packet tới server.
+3. Server xử lý request và trả response qua kết nối phù hợp.
+4. Client kiểm tra response, cache hoặc render dữ liệu cho người dùng.
+
+**Nói như trong interview:** NAT đổi địa chỉ và cổng private thành địa chỉ public khi gói tin đi ra Internet, rồi đổi ngược khi phản hồi quay về. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Đọc nhanh trước khi đi sâu**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ### Bước 1. Gói đi ra và tạo entry
 Host A (`192.168.1.10:51000`) gửi SYN tới `198.51.100.7:443`. Router thấy 5-tuple (giao thức, src IP, src port, dst IP, dst port) chưa có trong bảng, nên tạo entry mới. Trên Linux, bảng này là conntrack của netfilter.

@@ -4,26 +4,36 @@
 
 Chủ đề: Distributed Systems · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nhiều máy cùng phục vụ một hệ thống. Khó ở chỗ mạng có thể chậm hoặc đứt, máy có thể hỏng, nhưng người dùng vẫn cần kết quả hợp lý.
+
+**Nói đơn giản:** CAP nói rằng khi mạng bị chia cắt, hệ thống phải ưu tiên nhất quán hoặc sẵn sàng phục vụ; không thể đảm bảo cả hai tuyệt đối.
+
+**Từ khóa cần biết:** node = một máy hoặc tiến trình; network failure = mạng chậm/đứt; consistency = các nơi nhìn dữ liệu giống nhau tới mức nào.
+
+**Ví dụ dễ hình dung:** Khi hai datacenter mất liên lạc, hệ thống phải chọn trả lỗi để giữ dữ liệu đúng hoặc tiếp tục nhận ghi rồi hòa giải sau.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Định lý CAP (Eric Brewer, 2000; chứng minh bởi Gilbert-Lynch 2002) nói: trong một hệ dữ liệu phân tán, khi xảy ra network partition, bạn phải chọn giữa Consistency (mọi đọc thấy write mới nhất) và Availability (mọi request tới node không chết đều có phản hồi). Bạn không thể có cả hai.
+### Đọc nhanh trước khi đi sâu
 
-Trong CAP, "C" là linearizability (strong consistency), "A" là mọi request có response (không timeout/error). "P" là tình huống không thể tránh: partition giữa node (mất mạng, switch chết) — mọi hệ phân tán thực sự gặp phải lúc này lúc khác. CAP không nói về thời bình — chỉ phát biểu khi partition xảy ra.
+**Ý chính:** CAP nói rằng khi mạng bị chia cắt, hệ thống phải ưu tiên nhất quán hoặc sẵn sàng phục vụ; không thể đảm bảo cả hai tuyệt đối.
 
-```mermaid
-flowchart TD
-    P["Network partition xảy ra<br/>(không tránh được)"]
-    P --> C["Consistency<br/>trả lỗi hoặc timeout<br/>để đảm bảo linearizability"]
-    P --> A["Availability<br/>trả response có thể là<br/>dữ liệu cũ (eventual)"]
-    C --> CP["Hệ CP<br/>Raft/Paxos, etcd,<br/>Spanner, ZooKeeper"]
-    A --> AP["Hệ AP<br/>Cassandra, DynamoDB,<br/>Riak, CouchDB"]
-```
+**Ví dụ interview:** Khi hai datacenter mất liên lạc, hệ thống phải chọn trả lỗi để giữ dữ liệu đúng hoặc tiếp tục nhận ghi rồi hòa giải sau.
 
-*Sơ đồ vị trí: khi partition xảy ra, hệ phải chọn nhánh. CP — ưu tiên consistency, hy sinh availability một số node. AP — ưu tiên availability, chấp nhận dữ liệu cũ. CA thuần (không phải CA trong PACELC) là mô hình lý thuyết thời bình không có partition.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Client gửi request tới một node hoặc gateway.
+2. Node gọi các node khác qua mạng và có thể gặp timeout hoặc retry.
+3. Hệ thống chọn cách giữ trạng thái đồng bộ và xử lý lỗi.
+4. Client nhận kết quả hoặc lỗi có thể retry an toàn.
 
-"CAP nói khi có network partition, chọn Consistency hoặc Availability. CP ghi/đọc có thể fail trong partition để đảm bảo linearizable (Raft/Paxos, etcd, Spanner). AP trả lời mọi request nhưng có thể trả dữ liệu cũ (Cassandra, DynamoDB). CA thuần không tồn tại trong thực tế vì partition là không tránh. PACELC mở rộng: khi partition, chọn C/A; khi không partition, chọn latency vs consistency. Đa số hệ thật (Cassandra, Cosmos, Spanner) cho chọn per-query. CAP là heuristic, không dùng để thiết kế chi tiết. Phỏng vấn Senior hay hỏi: phân biệt CP và AP cho từng hệ, hiểu PACELC, biết tại sao 'CA trong CAP' không tồn tại."
+**Nói như trong interview:** CAP nói rằng khi mạng bị chia cắt, hệ thống phải ưu tiên nhất quán hoặc sẵn sàng phục vụ; không thể đảm bảo cả hai tuyệt đối. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Ba thuộc tính trong CAP**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

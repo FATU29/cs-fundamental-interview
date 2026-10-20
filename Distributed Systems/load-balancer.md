@@ -4,36 +4,36 @@
 
 Chủ đề: Distributed Systems · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nhiều máy cùng phục vụ một hệ thống. Khó ở chỗ mạng có thể chậm hoặc đứt, máy có thể hỏng, nhưng người dùng vẫn cần kết quả hợp lý.
+
+**Nói đơn giản:** Load balancer nhận request rồi chọn một server khỏe để xử lý, nhờ đó tránh dồn tất cả traffic vào một máy.
+
+**Từ khóa cần biết:** node = một máy hoặc tiến trình; network failure = mạng chậm/đứt; consistency = các nơi nhìn dữ liệu giống nhau tới mức nào.
+
+**Ví dụ dễ hình dung:** Một server lỗi health check sẽ bị loại khỏi pool, request mới chuyển sang server khỏe.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Load balancer là thành phần đứng trước một nhóm backend server, nhận traffic từ client và phân phối tới các server phía sau theo thuật toán để cân bằng tải. Mục tiêu: scale ngang (thêm server tăng capacity), high availability (server chết vẫn có server khác phục vụ), và tách traffic không lành mạnh (DDoS, health check fail).
+### Đọc nhanh trước khi đi sâu
 
-Có hai tầng LB chính: **L4 (transport)** route dựa trên IP/port, ví dụ HAProxy TCP mode, AWS NLB, kernel IPVS. **L7 (application)** route dựa trên HTTP header, path, cookie — ví dụ Nginx, HAProxy HTTP mode, AWS ALB, Envoy. L7 thông minh hơn (routing theo URL, header) nhưng tốn CPU hơn L4 (phải parse HTTP).
+**Ý chính:** Load balancer nhận request rồi chọn một server khỏe để xử lý, nhờ đó tránh dồn tất cả traffic vào một máy.
 
-```mermaid
-flowchart LR
-    C1["Client 1"]
-    C2["Client 2"]
-    C3["Client 3"]
-    LB["Load Balancer<br/>(L4 hoặc L7)"]
-    S1["Backend 1"]
-    S2["Backend 2"]
-    S3["Backend 3"]
-    S4["Backend 4"]
-    C1 --> LB
-    C2 --> LB
-    C3 --> LB
-    LB --> S1
-    LB --> S2
-    LB --> S3
-    LB --> S4
-```
+**Ví dụ interview:** Một server lỗi health check sẽ bị loại khỏi pool, request mới chuyển sang server khỏe.
 
-*Sơ đồ vị trí: client gửi request tới LB; LB lookup backend pool, health check, chọn một server theo thuật toán, forward request. Backend xử lý và trả về LB rồi tới client (hoặc trả thẳng client tuỳ mode).*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Client gửi request tới một node hoặc gateway.
+2. Node gọi các node khác qua mạng và có thể gặp timeout hoặc retry.
+3. Hệ thống chọn cách giữ trạng thái đồng bộ và xử lý lỗi.
+4. Client nhận kết quả hoặc lỗi có thể retry an toàn.
 
-"Load balancer là thành phần đứng trước nhóm backend, phân phối traffic để scale và HA. L4 LB route theo IP/port, nhanh (~µs overhead), không thấy nội dung HTTP — phù hợp TCP, UDP, mTLS termination. L7 LB route theo HTTP path/header/cookie, thông minh hơn nhưng parse HTTP tốn CPU. Thuật toán phổ biến: round-robin (đơn giản, đều), least-connection (ưu tiên server ít conn), consistent hash (route cùng key tới cùng server — cache, session). Health check HTTP / TCP mỗi vài giây; nếu fail, LB gỡ server khỏi pool. Sticky session dùng cookie để cùng user tới cùng server — tránh nhưng vẫn cần cho stateful. HA: hai LB active-passive qua VRRP/keepalived hoặc DNS-based load balancing (Route 53, Cloudflare). Trong production, L7 thường dùng Nginx/Envoy, L4 dùng HAProxy/IPVS/AWS NLB."
+**Nói như trong interview:** Load balancer nhận request rồi chọn một server khỏe để xử lý, nhờ đó tránh dồn tất cả traffic vào một máy. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. L4 LB — route dựa trên IP/port**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

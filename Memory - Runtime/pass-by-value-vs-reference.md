@@ -4,28 +4,36 @@
 
 Chủ đề: Memory - Runtime · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách chương trình dùng và thu hồi bộ nhớ khi đang chạy. Hiểu phần này giúp giải thích chậm, treo, crash và out-of-memory.
+
+**Nói đơn giản:** Pass-by-value truyền một bản sao của giá trị; với Java và Python, biến có thể chứa reference nhưng reference đó vẫn được truyền by value.
+
+**Từ khóa cần biết:** object = dữ liệu đang sống; reference = đường trỏ tới object; runtime = phần thực thi chương trình.
+
+**Ví dụ dễ hình dung:** Hàm nhận một List và thêm phần tử có thể làm list gốc đổi, nhưng gán biến parameter sang list mới không đổi biến caller.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Trong phỏng vấn câu này hỏi cơ chế binding giữa tham số và biến truyền vào:
+### Đọc nhanh trước khi đi sâu
 
-- **Pass-by-value (PBV)**: hàm nhận một bản sao giá trị. Sửa tham số không ảnh hưởng biến gốc.
-- **Pass-by-reference (PBR)**: hàm nhận một tham chiếu tới chính biến gốc (alias). Sửa tham số có nghĩa sửa biến gốc.
-- Phân biệt với "pass-by-value where value is a reference" (gọi là pass-by-sharing): gọi tham chiếu tới một object, hàm có thể mutate object nhưng không thể reassign biến gốc trỏ sang object khác. Java, Python, Ruby đều theo mô hình này.
+**Ý chính:** Pass-by-value truyền một bản sao của giá trị; với Java và Python, biến có thể chứa reference nhưng reference đó vẫn được truyền by value.
 
-C++ có cả PBV (`int x`) và PBR (`int& x`). Java và Go chỉ PBV. C# mặc định PBV, có chú thích `ref` / `in` / `out` để bật PBR. JavaScript chỉ PBV. Câu này hay "bẫy" ứng viên Java vì họ nghĩ reference type là PBR — không phải.
+**Ví dụ interview:** Hàm nhận một List và thêm phần tử có thể làm list gốc đổi, nhưng gán biến parameter sang list mới không đổi biến caller.
 
-```mermaid
-flowchart LR
-    Caller["Caller có biến a = 10 (PBV)<br/>hoặc a = obj (PBV của pointer)"] --> Arg["Đẩy vào stack frame<br/>giá trị copy"]
-    Callee["Callee nhận tham số b = copy"] --> Mut["Có thể mutate object nếu là<br/>reference type (Java)"]
-    Caller2["Caller C++ có int& b"] --> Callee2["Callee nhận chính biến a"] --> Alias["Sửa b là sửa a"]
-```
+**Luồng 4 bước:**
 
-*Sơ đồ vị trí: PBV thì giá trị copy hoàn toàn; PBR thì callee nhận chính biến. Java "pass-by-value of reference" là trường hợp đặc biệt: giá trị copy là address, mutate được object nhưng không reassign được biến gốc.*
+1. Code tạo object hoặc vùng nhớ.
+2. Runtime giữ object còn được dùng và cung cấp reference cho code.
+3. Object không còn reachable sẽ được free hoặc garbage collector thu hồi.
+4. Nếu giữ nhầm, vùng nhớ phình lên và chương trình chậm hoặc hết RAM.
 
-### Trả lời 30 giây
-
-"Pass-by-value nghĩa là hàm nhận bản sao giá trị; sửa tham số không tác động biến gốc. Pass-by-reference nghĩa là hàm nhận tham chiếu tới biến gốc; sửa tham số là sửa biến gốc. Java luôn pass-by-value; với reference type, giá trị copy là địa chỉ của object, nên hàm vẫn mutate được object nhưng không reassign biến gốc tới object khác. C# mặc định pass-by-value, cần chú thích `ref`/`in`/`out` để dùng pass-by-reference. C++ có cả hai với `&` và không `&`. Python không dùng hai mô hình này: gán `a = b` chỉ là tạo tên mới trỏ tới cùng object, không phải pass-by-value hay pass-by-reference. Trong phỏng vấn, luôn hỏi 'caller nhận được gì: bản sao hay chính biến?'"
+**Nói như trong interview:** Pass-by-value truyền một bản sao của giá trị; với Java và Python, biến có thể chứa reference nhưng reference đó vẫn được truyền by value. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. C++ pass-by-value và pass-by-reference**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

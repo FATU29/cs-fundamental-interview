@@ -4,28 +4,36 @@
 
 Chủ đề: Distributed Systems · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nhiều máy cùng phục vụ một hệ thống. Khó ở chỗ mạng có thể chậm hoặc đứt, máy có thể hỏng, nhưng người dùng vẫn cần kết quả hợp lý.
+
+**Nói đơn giản:** Strong consistency cho kết quả mới nhất ngay; eventual consistency cho phép đọc tạm thời cũ nhưng các bản sao sẽ hội tụ.
+
+**Từ khóa cần biết:** node = một máy hoặc tiến trình; network failure = mạng chậm/đứt; consistency = các nơi nhìn dữ liệu giống nhau tới mức nào.
+
+**Ví dụ dễ hình dung:** Sau khi đổi avatar, một edge cache có thể còn ảnh cũ vài giây nếu hệ thống dùng eventual consistency.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Mô hình nhất quán (consistency model) là hợp đồng giữa hệ thống và client về việc một thao tác ghi-thì-đọc thấy gì. Có nhiều mô hình xếp từ mạnh đến yếu: strong / linearizability mạnh nhất — đọc luôn thấy write mới nhất, như chạy trên một máy; eventual yếu nhất — chỉ đảm bảo "không có write mới thì mọi replica sẽ hội tụ". Giữa có sequential, causal, read-your-writes, monotonic reads.
+### Đọc nhanh trước khi đi sâu
 
-Hệ phân tán thường chọn mô hình yếu hơn để đổi lấy availability và latency thấp. DynamoDB, Cassandra, Riak chọn eventual mặc định. Spanner, CockroachDB, etcd chọn linearizability. Một số hệ cho phép cấu hình: Cosmos DB có 5 mức, Riak có R/W quorum, Aerospike có read consistency level.
+**Ý chính:** Strong consistency cho kết quả mới nhất ngay; eventual consistency cho phép đọc tạm thời cũ nhưng các bản sao sẽ hội tụ.
 
-```mermaid
-flowchart TD
-    SC["Strong / Linearizable<br/>(đọc thấy write mới nhất,<br/>như chạy một máy)"]
-    SEQ["Sequential<br/>(thứ tự toàn cục duy nhất,<br/>không cần theo thời gian thực)"]
-    C["Causal<br/>(gây nhân-quả thấy nhau,<br/>ghi độc lập có thể khác thứ tự)"]
-    RW["Read-your-writes<br/>(client thấy write của chính mình)"]
-    MR["Monotonic reads<br/>(đọc sau không thấy bản cũ hơn đọc trước)"]
-    EV["Eventual<br/>(chỉ hội tụ khi không còn write)"]
-    SC --> SEQ --> C --> RW --> MR --> EV
-```
+**Ví dụ interview:** Sau khi đổi avatar, một edge cache có thể còn ảnh cũ vài giây nếu hệ thống dùng eventual consistency.
 
-*Sơ đồ vị trí: sáu mô hình xếp từ mạnh (top) đến yếu (bottom). Hệ thực tế thường cung cấp tập con trong chuỗi này. Linearizable cho phép mọi thao tác; eventual cho phép nhiều replica tự do.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Client gửi request tới một node hoặc gateway.
+2. Node gọi các node khác qua mạng và có thể gặp timeout hoặc retry.
+3. Hệ thống chọn cách giữ trạng thái đồng bộ và xử lý lỗi.
+4. Client nhận kết quả hoặc lỗi có thể retry an toàn.
 
-"Mô hình nhất quán trả lời 'sau khi tôi ghi, đọc sẽ thấy gì'. Mạnh nhất là strong / linearizable — đọc luôn thấy write mới nhất theo thứ tự thời gian thực. Yếu nhất là eventual — chỉ đảm bảo không có write mới thì mọi replica hội tụ. Giữa có sequential (một thứ tự toàn cục), causal (gây nhân quả thấy nhau), read-your-writes (client thấy write của mình). DynamoDB, Cassandra mặc định eventual; Spanner, etcd, CockroachDB linearizable; Cosmos DB 5 mức tuỳ chọn. Yếu hơn khi workload chịu staleness (feed, view count); mạnh khi correctness quan trọng (payment, inventory)."
+**Nói như trong interview:** Strong consistency cho kết quả mới nhất ngay; eventual consistency cho phép đọc tạm thời cũ nhưng các bản sao sẽ hội tụ. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Linearizability (strong) — đọc thấy write mới nhất**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

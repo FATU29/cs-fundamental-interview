@@ -4,26 +4,36 @@
 
 Chủ đề: Database · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nơi ứng dụng lưu dữ liệu và đọc lại dữ liệu. Khó ở chỗ dữ liệu phải đúng khi nhiều người cùng đọc, ghi, hoặc khi máy bị lỗi.
+
+**Nói đơn giản:** Thiết kế index tốt bắt đầu từ câu SELECT thật sự chạy, rồi sắp cột trong index theo điều kiện lọc và sắp xếp.
+
+**Từ khóa cần biết:** row = một dòng dữ liệu; query = câu hỏi gửi database; transaction = một nhóm thay đổi được xử lý cùng nhau.
+
+**Ví dụ dễ hình dung:** Với GET /orders?user_id=42&status=paid ORDER BY created_at, index nên bắt đầu bằng user_id và status rồi mới tới created_at.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Index cho GET request là composite B+ tree index (có thể kèm covering) được thiết kế để phục vụ truy vấn đọc phổ biến với số page read ít nhất, tránh quét bảng. Mục tiêu: chuyển từ seq scan (O(N)) sang index scan (O(log N) + số row matched), và khi có thể, dùng index-only scan (covering) để không đọc row.
+### Đọc nhanh trước khi đi sâu
 
-GET request phổ biến gồm point query (tìm theo một khoá), range query (lọc theo khoảng), sort + limit (danh sách phân trang), và filter nhiều cột. Mỗi dạng cần cách chọn index khác nhau, nhưng quy tắc chung là: cột equality trước, cột range và sort sau, cột thường xuất hiện trong SELECT đưa vào covering (nếu nhỏ).
+**Ý chính:** Thiết kế index tốt bắt đầu từ câu SELECT thật sự chạy, rồi sắp cột trong index theo điều kiện lọc và sắp xếp.
 
-```mermaid
-flowchart LR
-    Req["GET request<br/>(query params, filters, sort)"]
-    Plan["Query planner<br/>(EXPLAIN, cost)"]
-    Cidx["Composite index<br/>(equality, range, sort)"]
-    Cov["Covering index<br/>(index-only scan)"]
-    Req --> Plan --> Cidx --> Cov
-```
+**Ví dụ interview:** Với GET /orders?user_id=42&status=paid ORDER BY created_at, index nên bắt đầu bằng user_id và status rồi mới tới created_at.
 
-*Sơ đồ vị trí: GET request đi qua planner, planner chọn index tối ưu, composite index cho filter, covering cho SELECT không cần row.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Bắt đầu từ câu GET và điều kiện WHERE/ORDER BY thật.
+2. Chọn thứ tự cột index theo equality, range rồi sort phù hợp.
+3. Query planner quyết định dùng index hay full scan.
+4. Đo EXPLAIN và latency trước/sau để tránh index làm write chậm hơn.
 
-"Phân tích access pattern trước (query nào chạy nhiều, filter cột nào, sort cột nào), rồi tạo composite B+ tree index với thứ tự: cột equality trước, cột range/sort sau, cột trong SELECT đưa vào covering. Dùng keyset pagination thay vì OFFSET, vì OFFSET 100000 vẫn phải đọc 100000 row rồi bỏ. Đo bằng `EXPLAIN ANALYZE` xem planner có dùng index và có `Using index` (covering) không. Cân nhắc write cost: mỗi index thêm ~1-3 page write mỗi lần INSERT/UPDATE/DELETE. Một query mà planner chọn seq scan thường vì statistics lỗi thời, không phải vì index không tồn tại."
+**Nói như trong interview:** Thiết kế index tốt bắt đầu từ câu SELECT thật sự chạy, rồi sắp cột trong index theo điều kiện lọc và sắp xếp. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Phân tích access pattern**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

@@ -4,31 +4,38 @@
 
 Chủ đề: Networking · Ngày: 2026-10-15
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách trình duyệt, ứng dụng và máy chủ gửi dữ liệu cho nhau. Mỗi bước có giao thức, độ trễ và kiểu lỗi riêng.
+
+**Nói đơn giản:** OSI chia việc truyền dữ liệu thành bảy lớp để dễ thiết kế và debug; mỗi lớp thêm header của mình rồi chuyển xuống lớp dưới.
+
+**Từ khóa cần biết:** client = bên gửi request; server = bên phục vụ; packet = mảnh dữ liệu đi qua mạng.
+
+**Ví dụ dễ hình dung:** Khi gửi HTTP, ứng dụng tạo request, TCP chia stream, IP định tuyến packet, Ethernet gửi frame qua dây.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Mô hình OSI (Open Systems Interconnection, ISO/IEC 7498-1, 1984) là khung tham chiếu 7 tầng chia nhỏ việc truyền dữ liệu qua mạng. Mỗi tầng có ba đặc trưng: PDU (đơn vị dữ liệu nó trao đổi), chức năng, và ví dụ giao thức/thiết bị. Bảy tầng từ dưới lên: Physical, Data Link, Network, Transport, Session, Presentation, Application.
-
-OSI là mô hình tham chiếu, không phải stack thật. Internet chạy TCP/IP 4 tầng: Application (gộp OSI 5-6-7), Transport, Internet, Link (gộp OSI 1-2). Mô hình 7 tầng vẫn có giá trị vì nó tách rõ ranh giới trách nhiệm — tiện khi troubleshoot và khi mô tả nơi lỗi xảy ra.
-
-Giả định: bài này nói về mạng IP hiện đại (Ethernet + IPv4/IPv6 + TCP/UDP + TLS + HTTP/QUIC).
-
-```mermaid
-flowchart TB
-    A["7. Application<br/>HTTP, DNS, gRPC"]
-    P["6. Presentation<br/>TLS, JSON, gzip"]
-    S["5. Session<br/>TLS session, SMB"]
-    T["4. Transport<br/>TCP 20B, UDP 8B"]
-    N["3. Network<br/>IPv4 20B, IPv6 40B"]
-    D["2. Data Link<br/>Ethernet 14B, MAC"]
-    Ph["1. Physical<br/>Bit tren cap"]
-    A --> P --> S --> T --> N --> D --> Ph
-```
-
-*Sơ đồ 7 tầng OSI: mỗi tầng nhận payload từ tầng trên, thêm header của mình rồi chuyển xuống tầng dưới.*
-
-**Trả lời 30 giây:** OSI là khung 7 tầng mô tả cách dữ liệu đi từ ứng dụng A đến ứng dụng B. Application (HTTP) đóng gói dữ liệu, Transport (TCP) thêm cổng và số thứ tự, Network (IP) thêm địa chỉ nguồn/đích, Data Link (Ethernet) thêm MAC, Physical chuyển thành tín hiệu trên cáp. Mỗi hop router đọc IP rồi đóng Ethernet mới, nhưng không chạm payload bên trong. TCP đảm bảo byte đến đúng thứ tự qua ACK và retransmit, nhưng không đảm bảo thời gian.
 
 ## 2. Cơ chế cốt lõi
+### Đọc nhanh trước khi đi sâu
+
+**Ý chính:** OSI chia việc truyền dữ liệu thành bảy lớp để dễ thiết kế và debug; mỗi lớp thêm header của mình rồi chuyển xuống lớp dưới.
+
+**Ví dụ interview:** Khi gửi HTTP, ứng dụng tạo request, TCP chia stream, IP định tuyến packet, Ethernet gửi frame qua dây.
+
+**Luồng 4 bước:**
+
+1. Ứng dụng tạo request với tên host, port và dữ liệu.
+2. OS và các giao thức mạng tìm đường rồi chuyển packet tới server.
+3. Server xử lý request và trả response qua kết nối phù hợp.
+4. Client kiểm tra response, cache hoặc render dữ liệu cho người dùng.
+
+**Nói như trong interview:** OSI chia việc truyền dữ liệu thành bảy lớp để dễ thiết kế và debug; mỗi lớp thêm header của mình rồi chuyển xuống lớp dưới. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Đọc nhanh trước khi đi sâu**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ### 7 tầng và PDU
 

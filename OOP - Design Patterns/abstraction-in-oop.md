@@ -4,26 +4,36 @@
 
 Chủ đề: OOP - Design Patterns · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách tổ chức code thành những đối tượng dễ thay đổi. Mục tiêu là giữ luật của nghiệp vụ rõ ràng và tránh code phụ thuộc chặt vào nhau.
+
+**Nói đơn giản:** Abstraction cho người dùng một contract đơn giản và giấu cách bên trong thực hiện contract đó.
+
+**Từ khóa cần biết:** class = khuôn; object = instance cụ thể; method = hành vi mà object cung cấp.
+
+**Ví dụ dễ hình dung:** Code gọi paymentGateway.charge() mà không cần biết bên trong dùng HTTP, retry hay ký request.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Abstraction là một trong bốn trụ cột của OOP (cùng encapsulation, inheritance, polymorphism). Abstraction trả lời câu hỏi "đối tượng này làm được gì", tách khỏi "làm bằng cách nào". Lập trình viên thiết kế một tập method công khai (interface hoặc abstract class), bên trong có thể đổi cách hiện thực mà client không phải sửa.
+### Đọc nhanh trước khi đi sâu
 
-```mermaid
-flowchart LR
-    C["Client<br/>(gọi qua abstract API)"]
-    A["Abstract type<br/>(interface / abstract class)"]
-    C1["ConcreteImpl A"]
-    C2["ConcreteImpl B"]
-    C --> A
-    A -. impl .-> C1
-    A -. impl .-> C2
-```
+**Ý chính:** Abstraction cho người dùng một contract đơn giản và giấu cách bên trong thực hiện contract đó.
 
-*Sơ đồ vị trí: client chỉ giữ reference tới abstract type. Concrete implementation có thể thay đổi hoặc thêm mới mà không ảnh hưởng client.*
+**Ví dụ interview:** Code gọi paymentGateway.charge() mà không cần biết bên trong dùng HTTP, retry hay ký request.
 
-### Trả lời 30 giây
+**Luồng 4 bước:**
 
-"Abstraction là ẩn chi tiết hiện thực, chỉ phơi ra contract cần thiết. Trong Java có hai cơ chế chính: interface (chỉ method signature, Java 8+ có default method), và abstract class (có thể chứa state và method có hiện thực). Client code chỉ phụ thuộc abstract type, không phụ thuộc concrete class — đây là Dependency Inversion Principle. Abstraction khác encapsulation: abstraction quyết định 'lộ cái gì ra', encapsulation quyết định 'giấu cái gì và bảo vệ state như thế nào'. Ví dụ: List là abstraction, ArrayList là encapsulation + hiện thực. Trong phỏng vấn, dùng 'abstraction' khi nói về interface/abstract class; dùng 'encapsulation' khi nói về private field + getter/setter hoặc invariant."
+1. Client gọi một contract dễ hiểu.
+2. Object hoặc pattern chọn code thực hiện phía sau contract.
+3. State và dependency được giữ ở nơi có trách nhiệm rõ ràng.
+4. Khi requirement đổi, thay implementation mà giảm ảnh hưởng tới client.
+
+**Nói như trong interview:** Abstraction cho người dùng một contract đơn giản và giấu cách bên trong thực hiện contract đó. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Abstract class vs interface trong Java**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 
@@ -132,9 +142,9 @@ Nếu abstract method không ổn định: ví dụ `charge()` signature đổi 
 
 ```java
 // Ví dụ chưa chạy thử
-interface PaymentGateway { 
-  PaymentResult charge(Money amount); 
-  Refund refund(String txnId); 
+interface PaymentGateway {
+  PaymentResult charge(Money amount);
+  Refund refund(String txnId);
 }
 abstract class AbstractPaymentGateway implements PaymentGateway {
   protected <T> T withRetry(Supplier<T> call, int max) { /* retry 3x */ }

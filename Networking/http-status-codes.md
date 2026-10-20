@@ -4,26 +4,38 @@
 
 Chủ đề: Networking · Ngày: 2026-10-15
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách trình duyệt, ứng dụng và máy chủ gửi dữ liệu cho nhau. Mỗi bước có giao thức, độ trễ và kiểu lỗi riêng.
+
+**Nói đơn giản:** HTTP status code là tín hiệu ngắn cho client biết request thành công, chuyển hướng, sai ở client hay lỗi ở server.
+
+**Từ khóa cần biết:** client = bên gửi request; server = bên phục vụ; packet = mảnh dữ liệu đi qua mạng.
+
+**Ví dụ dễ hình dung:** API trả 201 khi tạo order, 401 khi thiếu đăng nhập, 429 khi user vượt rate limit và 503 khi service tạm quá tải.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-HTTP status code là ba chữ số (100–599) trong dòng đầu tiên của HTTP response, do server hoặc proxy đặt để báo kết quả xử lý request. Chữ số đầu xác định lớp: **1xx Informational**, **2xx Success**, **3xx Redirection**, **4xx Client Error**, **5xx Server Error**.
-
-**Trả lời 30 giây:** HTTP status code là hợp đồng giữa client và server. Ba chữ số chia thành năm lớp theo RFC 9110: 1xx báo "đang xử lý" (100 Continue, 103 Early Hints), 2xx báo thành công (200 OK, 201 Created, 204 No Content), 3xx báo chuyển hướng (301, 302, 304, 307, 308), 4xx báo lỗi do request (400, 401, 403, 404, 422, 429), 5xx báo lỗi do server (500, 502, 503, 504). Proxy có thể tự sinh 502/503/504 mà ứng dụng phía sau không biết. Client phải xử lý mã lạ theo lớp của nó (ví dụ 425 coi như 400).
-
-```mermaid
-flowchart LR
-  R["Status line<br/>HTTP/1.1 NNN reason"] --> C1["1xx Informational<br/>100, 101, 103"]
-  R --> C2["2xx Success<br/>200, 201, 202, 204, 206"]
-  R --> C3["3xx Redirection<br/>301, 302, 304, 307, 308"]
-  R --> C4["4xx Client error<br/>400, 401, 403, 404, 409, 422, 429"]
-  R --> C5["5xx Server error<br/>500, 502, 503, 504"]
-  C4 -.->|"giữ nguyên request thì retry vô ích"| X1["Client phải sửa request"]
-  C5 -.->|"retry có điều kiện"| X2["Cần idempotency, backoff, jitter"]
-```
-
-*Sơ đồ: năm lớp status code và hành vi mặc định của client.*
 
 ## 2. Cơ chế cốt lõi
+### Đọc nhanh trước khi đi sâu
+
+**Ý chính:** HTTP status code là tín hiệu ngắn cho client biết request thành công, chuyển hướng, sai ở client hay lỗi ở server.
+
+**Ví dụ interview:** API trả 201 khi tạo order, 401 khi thiếu đăng nhập, 429 khi user vượt rate limit và 503 khi service tạm quá tải.
+
+**Luồng 4 bước:**
+
+1. Ứng dụng tạo request với tên host, port và dữ liệu.
+2. OS và các giao thức mạng tìm đường rồi chuyển packet tới server.
+3. Server xử lý request và trả response qua kết nối phù hợp.
+4. Client kiểm tra response, cache hoặc render dữ liệu cho người dùng.
+
+**Nói như trong interview:** HTTP status code là tín hiệu ngắn cho client biết request thành công, chuyển hướng, sai ở client hay lỗi ở server. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Đọc nhanh trước khi đi sâu**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ### Bước 1. Ai đặt mã — qua các tầng
 

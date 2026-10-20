@@ -4,28 +4,36 @@
 
 Chủ đề: Database · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nơi ứng dụng lưu dữ liệu và đọc lại dữ liệu. Khó ở chỗ dữ liệu phải đúng khi nhiều người cùng đọc, ghi, hoặc khi máy bị lỗi.
+
+**Nói đơn giản:** Normalization chia dữ liệu thành các bảng hợp lý để giảm lặp và tránh sửa một nơi nhưng quên nơi khác.
+
+**Từ khóa cần biết:** row = một dòng dữ liệu; query = câu hỏi gửi database; transaction = một nhóm thay đổi được xử lý cùng nhau.
+
+**Ví dụ dễ hình dung:** Thông tin khách hàng chỉ lưu một lần, bảng order giữ customer_id; sửa email không cần sửa hàng nghìn order.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Normalization là quy trình tổ chức bảng quan hệ để giảm dư thừa và tránh bất thường cập nhật (update, insertion, deletion anomalies) bằng cách tách thuộc tính thành nhiều bảng theo phụ thuộc hàm (functional dependency) và khóa. Mục tiêu kỹ thuật: mỗi sự kiện được lưu đúng một lần và mỗi thuộc tính phụ thuộc đúng vào khóa, vào toàn khóa, và không gì ngoài khóa. Thước đo là các dạng chuẩn 1NF, 2NF, 3NF, BCNF, và nâng cao 4NF, 5NF. Normalization mạnh hơn (BCNF, 5NF) đổi nhiều JOIN hơn khi đọc, nên production thường dừng ở 3NF/BCNF rồi cân nhắc denormalization có chủ đích.
+### Đọc nhanh trước khi đi sâu
 
-Giả định: phạm vi là relational databases (RDBMS); không bao gồm NoSQL document model.
+**Ý chính:** Normalization chia dữ liệu thành các bảng hợp lý để giảm lặp và tránh sửa một nơi nhưng quên nơi khác.
 
-```mermaid
-flowchart LR
-    Req["Yêu cầu nghiệp vụ<br/>(thanh toán, kho, đặt hàng)"]
-    Er["Mô hình ER<br/>thực thể · quan hệ"]
-    Fd["Phụ thuộc hàm<br/>(FD) · khóa ứng viên"]
-    Nf["Dạng chuẩn<br/>1NF → 2NF → 3NF → BCNF"]
-    Schema["Schema chuẩn hóa<br/>nhiều bảng · ít NULL"]
-    Norm[("Bảng đã chuẩn hóa")]
-    Req --> Er --> Fd --> Nf --> Schema --> Norm
-```
+**Ví dụ interview:** Thông tin khách hàng chỉ lưu một lần, bảng order giữ customer_id; sửa email không cần sửa hàng nghìn order.
 
-*Sơ đồ vị trí: từ yêu cầu nghiệp vụ tới mô hình ER, xác định phụ thuộc hàm, áp dạng chuẩn, ra schema nhiều bảng. Phụ thuộc hàm là nền, dạng chuẩn là thước đo.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Tách dữ liệu lặp thành các bảng có ý nghĩa.
+2. Dùng key để liên kết bảng thay vì chép cùng một giá trị nhiều nơi.
+3. Constraint giữ quan hệ và ngăn dữ liệu mâu thuẫn.
+4. Khi đọc cần JOIN; khi cần tốc độ có thể denormalize có chủ đích.
 
-"Normalization tổ chức bảng quan hệ sao cho mỗi dữ liệu lưu đúng một chỗ và không phụ thuộc vào thuộc tính không khóa, dựa trên phụ thuộc hàm. Các dạng chuẩn: 1NF cấm lặp nhóm/lặp cột, 2NF cấm phụ thuộc một phần vào khóa tổng hợp, 3NF cấm phụ thuộc bắc cầu qua thuộc tính không khóa, BCNF yêu cầu mọi FD đều do siêu khóa xác định. Chuẩn hóa giảm anomaly insert/update/delete, nhưng JOIN nhiều hơn nên đọc chậm hơn. Thực tế 3NF/BCNF là mặt bằng phỏng vấn, sau đó cân nhắc denormalization có chủ đích."
+**Nói như trong interview:** Normalization chia dữ liệu thành các bảng hợp lý để giảm lặp và tránh sửa một nơi nhưng quên nơi khác. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Phụ thuộc hàm (FD) và khóa**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

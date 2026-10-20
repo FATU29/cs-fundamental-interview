@@ -4,24 +4,36 @@
 
 Chủ đề: Operating Systems · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Lớp phần mềm quản lý CPU, bộ nhớ, tiến trình và thiết bị. Ứng dụng gọi OS thay vì tự điều khiển phần cứng trực tiếp.
+
+**Nói đơn giản:** Paging chia bộ nhớ thành page kích thước cố định; segmentation chia theo vùng có ý nghĩa như code, stack hoặc data.
+
+**Từ khóa cần biết:** process = chương trình đang chạy; thread = luồng thực thi; kernel = phần lõi có quyền điều khiển máy.
+
+**Ví dụ dễ hình dung:** Virtual address được tách thành page number và offset; segmentation hợp với các vùng code, data, stack có kích thước khác nhau.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Paging chia bộ nhớ vật lý thành các frame kích thước cố định (thường 4 KB), bộ nhớ ảo thành page cùng kích thước; OS quản lý page table ánh xạ page → frame. Segmentation chia bộ nhớ thành các đoạn (segment) kích thước thay đổi theo nhu cầu logic (code, stack, heap); mỗi segment có base + limit; địa chỉ ảo = segment selector + offset.
+### Đọc nhanh trước khi đi sâu
 
-```mermaid
-flowchart LR
-    A["Virtual Address"] --> B{"Cơ chế"}
-    B -->|Paging| P["VPN + offset<br/>page table<br/>4 KB cố định"]
-    B -->|Segmentation| S["Selector + offset<br/>base + limit<br/>variable size"]
-    P --> PM["Physical frame"]
-    S --> SM["Physical base + offset"]
-```
+**Ý chính:** Paging chia bộ nhớ thành page kích thước cố định; segmentation chia theo vùng có ý nghĩa như code, stack hoặc data.
 
-*Sơ đồ vị trí: virtual address đi qua một trong hai cơ chế dịch; paging dùng page table lookup, segmentation dùng base+limit. x86-64 hiện đại dùng paging thuần cho user mode.*
+**Ví dụ interview:** Virtual address được tách thành page number và offset; segmentation hợp với các vùng code, data, stack có kích thước khác nhau.
 
-### Trả lời 30 giây
+**Luồng 4 bước:**
 
-"Paging chia bộ nhớ thành page cố định (4 KB hoặc 2 MB); translation qua page table tra cứu O(1) trong TLB hit. Segmentation chia thành segment variable size (code, stack, data); translation qua base+limit, nhưng khó swap vì fragment. Paging thắng vì không có external fragmentation, dễ ảo hoá, dễ swap. x86-64 hiện đại vẫn có segment register (CS, DS) nhưng flat mode — base=0, limit=full — segmentation chỉ còn phân biệt user/kernel qua ring level. Page fault (~1-10 µs) xảy ra khi page không trong RAM, OS swap từ disk. Segmentation fault (Unix) là một dạng page fault khi truy cập vượt limit hoặc segment không hợp lệ."
+1. OS chia address space thành page cố định hoặc segment theo vùng logic.
+2. CPU tách địa chỉ thành phần cần tra và offset.
+3. MMU dùng page table hoặc segment table để kiểm tra quyền và tìm địa chỉ thật.
+4. Thiết kế được chọn dựa trên fragmentation, protection và hardware support.
+
+**Nói như trong interview:** Paging chia bộ nhớ thành page kích thước cố định; segmentation chia theo vùng có ý nghĩa như code, stack hoặc data. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Paging — địa chỉ ảo và page table**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

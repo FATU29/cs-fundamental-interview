@@ -4,27 +4,36 @@
 
 Chủ đề: Database · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nơi ứng dụng lưu dữ liệu và đọc lại dữ liệu. Khó ở chỗ dữ liệu phải đúng khi nhiều người cùng đọc, ghi, hoặc khi máy bị lỗi.
+
+**Nói đơn giản:** Index B+ tree là cấu trúc phụ giúp database tìm dòng theo khóa mà không phải đọc toàn bộ bảng.
+
+**Từ khóa cần biết:** row = một dòng dữ liệu; query = câu hỏi gửi database; transaction = một nhóm thay đổi được xử lý cùng nhau.
+
+**Ví dụ dễ hình dung:** Tìm đơn hàng theo order_id bằng index đi qua vài node thay vì quét hàng triệu dòng.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Database index là một cấu trúc dữ liệu phụ, được storage engine duy trì song song với bảng, giúp tra cứu row theo giá trị (hoặc cụm cột) mà không phải quét toàn bộ bảng. B+ tree là cấu trúc index mặc định trong hầu hết RDBMS quan hệ (PostgreSQL, MySQL InnoDB, SQL Server, Oracle, SQLite), vì nó giữ dữ liệu đã sắp xếp, hỗ trợ equality, range và prefix scan với số trang đĩa phải đọc tỷ lệ với `log_fanout(N)`, không phải `N`.
+### Đọc nhanh trước khi đi sâu
 
-Cần B+ tree vì bảng lớn không thể sort trong RAM, và hash index không giữ thứ tự nên range query vẫn phải quét bảng. B+ tree lưu bản sao đã sắp xếp của key kèm con trỏ tới row (hoặc chính row), và giữ cân bằng để mọi node nằm ở cùng độ sâu.
+**Ý chính:** Index B+ tree là cấu trúc phụ giúp database tìm dòng theo khóa mà không phải đọc toàn bộ bảng.
 
-```mermaid
-flowchart LR
-    App["Application<br/>(GET /users/:id,<br/>order lookup)"]
-    Opt["Query planner<br/>(EXPLAIN, cost)"]
-    Idx["B+ tree index<br/>(sorted, balanced,<br/>fan-out ~100-200)"]
-    Heap["Heap / clustered table<br/>(rows theo PK)"]
-    Disk["Disk / SSD<br/>(8 KB pages)"]
-    App --> Opt --> Idx --> Heap --> Disk
-```
+**Ví dụ interview:** Tìm đơn hàng theo order_id bằng index đi qua vài node thay vì quét hàng triệu dòng.
 
-*Sơ đồ vị trí: Application gửi query, planner chọn index, B+ tree trỏ tới row trong heap (PostgreSQL) hoặc chính row (MySQL InnoDB clustered PK). Disk là các page 8 KB.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Database nhận điều kiện tìm theo một hoặc nhiều key.
+2. Engine đi từ root qua các internal node của B+ tree.
+3. Leaf node tìm key và row pointer/primary key tương ứng.
+4. Engine đọc row cần thiết thay vì quét toàn bộ bảng.
 
-"Index là cấu trúc phụ lưu bản sao đã sắp xếp của key và con trỏ tới row. B+ tree giữ tất cả data record ở leaf node, internal node chỉ chứa separator key để dẫn đường, các leaf nối nhau thành danh sách liên kết đôi. Một lookup equality mất `O(log_fanout N)` disk page, với fan-out ~100-200 trên page 8 KB nên tree 3 tầng chứa được vài triệu row. Range query chạy nhanh vì leaf đã sort, chỉ cần quét liên tục. Hash index nhanh hơn cho equality nhưng không range được, nên B+ tree là lựa chọn mặc định."
+**Nói như trong interview:** Index B+ tree là cấu trúc phụ giúp database tìm dòng theo khóa mà không phải đọc toàn bộ bảng. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Cấu trúc một node B+ tree**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

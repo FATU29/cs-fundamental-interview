@@ -4,31 +4,38 @@
 
 Chủ đề: Networking · Ngày: 2026-10-15
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách trình duyệt, ứng dụng và máy chủ gửi dữ liệu cho nhau. Mỗi bước có giao thức, độ trễ và kiểu lỗi riêng.
+
+**Nói đơn giản:** TCP đảm bảo byte stream đúng thứ tự; UDP gửi từng datagram với ít cơ chế bảo đảm hơn để đổi lấy độ trễ và quyền kiểm soát.
+
+**Từ khóa cần biết:** client = bên gửi request; server = bên phục vụ; packet = mảnh dữ liệu đi qua mạng.
+
+**Ví dụ dễ hình dung:** Thanh toán cần TCP để đủ và đúng thứ tự; game state có thể dùng UDP vì frame cũ hết giá trị khi frame mới tới.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-TCP (Transmission Control Protocol, RFC 9293) là giao thức tầng vận chuyển hướng kết nối, cung cấp byte stream hai chiều có thứ tự và tin cậy. UDP (User Datagram Protocol, RFC 768) là giao thức tầng vận chuyển không kết nối, chỉ thêm port và checksum so với IP, mọi thứ còn lại (tin cậy, thứ tự, kiểm soát luồng) do ứng dụng tự làm.
-
-**Trả lời 30 giây:** TCP dùng 3-way handshake để đồng bộ sequence number, sau đó truyền byte stream có ACK và retransmission khi mất gói. Congestion control (CUBIC hoặc BBR) giữ cwnd phù hợp với bandwidth thực. UDP không có handshake, gửi datagram 8 byte header rồi không biết gì thêm. TCP tốn 1 RTT cho handshake và 1 packet overhead cho mỗi chiều data. UDP overhead thấp hơn nhưng ứng dụng phải tự lo reliability nếu cần.
-
-```mermaid
-flowchart LR
-    App["Application<br/>(HTTP, DNS, VoIP)"]
-    subgraph T["Transport Layer"]
-        TCP["TCP<br/>reliable · in-order<br/>flow · congestion control"]
-        UDP["UDP<br/>datagram · no state<br/>no retransmit"]
-    end
-    Net["Network Layer<br/>(IP)"]
-    App --> TCP
-    App --> UDP
-    TCP --> Net
-    UDP --> Net
-    style TCP fill:#b3e0ff
-    style UDP fill:#ffe0b3
-```
-
-*Sơ đồ vị trí: TCP và UDP cùng tầng vận chuyển (tầng 4), ứng dụng gọi một trong hai, cả hai đều dùng IP ở tầng 3.*
 
 ## 2. Cơ chế cốt lõi
+### Đọc nhanh trước khi đi sâu
+
+**Ý chính:** TCP đảm bảo byte stream đúng thứ tự; UDP gửi từng datagram với ít cơ chế bảo đảm hơn để đổi lấy độ trễ và quyền kiểm soát.
+
+**Ví dụ interview:** Thanh toán cần TCP để đủ và đúng thứ tự; game state có thể dùng UDP vì frame cũ hết giá trị khi frame mới tới.
+
+**Luồng 4 bước:**
+
+1. Ứng dụng tạo request với tên host, port và dữ liệu.
+2. OS và các giao thức mạng tìm đường rồi chuyển packet tới server.
+3. Server xử lý request và trả response qua kết nối phù hợp.
+4. Client kiểm tra response, cache hoặc render dữ liệu cho người dùng.
+
+**Nói như trong interview:** TCP đảm bảo byte stream đúng thứ tự; UDP gửi từng datagram với ít cơ chế bảo đảm hơn để đổi lấy độ trễ và quyền kiểm soát. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Đọc nhanh trước khi đi sâu**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ### 3-way handshake và 4-way close
 

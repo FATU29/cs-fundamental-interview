@@ -4,28 +4,36 @@
 
 Chủ đề: Distributed Systems · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nhiều máy cùng phục vụ một hệ thống. Khó ở chỗ mạng có thể chậm hoặc đứt, máy có thể hỏng, nhưng người dùng vẫn cần kết quả hợp lý.
+
+**Nói đơn giản:** Giữ nhiều service nhất quán cần chọn đúng công cụ: transaction cục bộ, outbox, saga, quorum hoặc consensus.
+
+**Từ khóa cần biết:** node = một máy hoặc tiến trình; network failure = mạng chậm/đứt; consistency = các nơi nhìn dữ liệu giống nhau tới mức nào.
+
+**Ví dụ dễ hình dung:** Order service commit thành công nhưng message gửi kho thất bại; outbox giữ message để worker gửi lại.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-"Giữ hệ phân tán nhất quán" có hai tầng nghĩa. Tầng mô hình: client thấy dữ liệu thế nào (strong, eventual, causal). Tầng kỹ thuật: hệ thống ghi, đọc, đồng bộ, fail-over ra sao để đạt mô hình đó. Bài này nói tầng kỹ thuật — các cơ chế để dữ liệu không bị mất, không ghi trùng, không đọc về giá trị cũ.
+### Đọc nhanh trước khi đi sâu
 
-Một hệ phân tán mất nhất quán khi: ghi thành công ở node A nhưng chưa replicate sang B, client đọc từ B thấy dữ liệu cũ (replication lag); transaction đa node chỉ commit một nửa (split-brain); retry vì timeout tạo ghi trùng; leader cũ vẫn tưởng mình là leader ghi đè lên leader mới.
+**Ý chính:** Giữ nhiều service nhất quán cần chọn đúng công cụ: transaction cục bộ, outbox, saga, quorum hoặc consensus.
 
-```mermaid
-flowchart LR
-    N1["Node A<br/>leader"]
-    N2["Node B<br/>follower"]
-    N3["Node C<br/>follower"]
-    C["Client"]
-    C <--> N1
-    N1 <--> N2
-    N1 <--> N3
-```
+**Ví dụ interview:** Order service commit thành công nhưng message gửi kho thất bại; outbox giữ message để worker gửi lại.
 
-*Sơ đồ vị trí: 1 leader + N-1 follower. Client đọc/ghi qua leader (hoặc cả follower tùy cấu hình) và leader replicate xuống follower. Bài toán "nhất quán" quyết định cách leader đợi follower, cách failover, cách xử lý conflict.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Client gửi request tới một node hoặc gateway.
+2. Node gọi các node khác qua mạng và có thể gặp timeout hoặc retry.
+3. Hệ thống chọn cách giữ trạng thái đồng bộ và xử lý lỗi.
+4. Client nhận kết quả hoặc lỗi có thể retry an toàn.
 
-"Giữ nhất quán nghĩa là đảm bảo dữ liệu không mất, không trùng, không lệch giữa các node. Bốn kỹ thuật cốt lõi: (1) quorum — ghi cần W ack, đọc cần R ack, chọn R+W>N; (2) consensus như Raft/Paxos — một leader hợp lệ tại một thời điểm; (3) saga — chuỗi bước local + compensating action; (4) outbox + idempotency key. Đánh đổi: quorum latency cao, consensus throughput giảm vì một leader, saga chỉ eventual, outbox cần poll. Phỏng vấn Senior phải chọn theo workload."
+**Nói như trong interview:** Giữ nhiều service nhất quán cần chọn đúng công cụ: transaction cục bộ, outbox, saga, quorum hoặc consensus. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Quorum — đảm bảo overlap giữa tập đọc và tập ghi**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

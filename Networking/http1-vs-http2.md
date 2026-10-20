@@ -4,33 +4,38 @@
 
 Chủ đề: Networking · Ngày: 2026-10-15
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách trình duyệt, ứng dụng và máy chủ gửi dữ liệu cho nhau. Mỗi bước có giao thức, độ trễ và kiểu lỗi riêng.
+
+**Nói đơn giản:** HTTP/1.1 gửi các request theo text và dễ bị chờ tuần tự; HTTP/2 dùng frame nhị phân và nhiều stream trên một kết nối.
+
+**Từ khóa cần biết:** client = bên gửi request; server = bên phục vụ; packet = mảnh dữ liệu đi qua mạng.
+
+**Ví dụ dễ hình dung:** Trang có nhiều ảnh dùng nhiều stream HTTP/2 trên một TCP connection thay vì mở nhiều connection HTTP/1.1.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-**Định nghĩa.** HTTP/1.1 (message syntax: RFC 9112) gửi request/response dạng text, mỗi kết nối TCP xử lý một request tại một thời điểm. HTTP/2 (RFC 9113) gửi cùng ngữ nghĩa (RFC 9110) dưới dạng binary frame, ghép nhiều stream trên một kết nối TCP, nén header bằng HPACK (RFC 7541).
-
-Ngữ nghĩa không đổi: method, status code, header, cache, cookie hoạt động như cũ. Chỉ lớp đóng gói và cách dùng kết nối thay đổi.
-
-Giả định: bài này nói HTTP/2 qua TLS (`h2`, chọn bằng ALPN) là cấu hình trình duyệt thực sự dùng. HTTP/2 cleartext (`h2c`) tồn tại nhưng trình duyệt không hỗ trợ.
-
-```mermaid
-flowchart TB
-    A["Application semantics<br/>methods, status codes, headers (RFC 9110)"]
-    B1["HTTP/1.1<br/>text messages"]
-    B2["HTTP/2<br/>binary frames, streams, HPACK"]
-    T["TLS (ALPN picks h2 or http/1.1)"]
-    C["TCP"]
-    A --> B1
-    A --> B2
-    B1 --> T
-    B2 --> T
-    T --> C
-```
-
-*Sơ đồ vị trí: HTTP/1.1 và HTTP/2 cùng mang một ngữ nghĩa, cùng chạy trên TLS và TCP; ALPN trong TLS handshake chọn giao thức.*
-
-**Trả lời 30 giây.** HTTP/1.1 là text, một request đang bay mỗi kết nối, nên trình duyệt mở khoảng 6 kết nối song song mỗi host để bù. HTTP/2 là binary frame, nhiều stream ghép trên một kết nối TCP, header được nén bằng HPACK. Nhờ đó bỏ được head-of-line blocking ở tầng HTTP. Nhưng HTTP/2 vẫn chạy trên TCP, nên một gói mất làm khựng mọi stream; HTTP/3 chạy trên QUIC để sửa điều này.
 
 ## 2. Cơ chế cốt lõi
+### Đọc nhanh trước khi đi sâu
+
+**Ý chính:** HTTP/1.1 gửi các request theo text và dễ bị chờ tuần tự; HTTP/2 dùng frame nhị phân và nhiều stream trên một kết nối.
+
+**Ví dụ interview:** Trang có nhiều ảnh dùng nhiều stream HTTP/2 trên một TCP connection thay vì mở nhiều connection HTTP/1.1.
+
+**Luồng 4 bước:**
+
+1. Ứng dụng tạo request với tên host, port và dữ liệu.
+2. OS và các giao thức mạng tìm đường rồi chuyển packet tới server.
+3. Server xử lý request và trả response qua kết nối phù hợp.
+4. Client kiểm tra response, cache hoặc render dữ liệu cho người dùng.
+
+**Nói như trong interview:** HTTP/1.1 gửi các request theo text và dễ bị chờ tuần tự; HTTP/2 dùng frame nhị phân và nhiều stream trên một kết nối. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Đọc nhanh trước khi đi sâu**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ### Bước 1. Chọn giao thức bằng ALPN
 Trong TLS handshake, ClientHello liệt kê `h2` và `http/1.1` trong extension ALPN (Application-Layer Protocol Negotiation). Server chọn một giá trị, không tốn thêm RTT. Server không hỗ trợ `h2` thì trình duyệt tự rơi về HTTP/1.1.

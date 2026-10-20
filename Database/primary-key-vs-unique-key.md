@@ -4,29 +4,36 @@
 
 Chủ đề: Database · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nơi ứng dụng lưu dữ liệu và đọc lại dữ liệu. Khó ở chỗ dữ liệu phải đúng khi nhiều người cùng đọc, ghi, hoặc khi máy bị lỗi.
+
+**Nói đơn giản:** Primary key định danh mỗi dòng và là khóa chính của bảng; unique key chỉ yêu cầu các giá trị không trùng.
+
+**Từ khóa cần biết:** row = một dòng dữ liệu; query = câu hỏi gửi database; transaction = một nhóm thay đổi được xử lý cùng nhau.
+
+**Ví dụ dễ hình dung:** user_id là định danh dòng; email có unique constraint để không hai tài khoản dùng cùng email.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Primary key (PK) là một hoặc nhiều cột định danh duy nhất mỗi row trong bảng, không được NULL, và mỗi bảng chỉ có một. Unique key (unique constraint) cũng đảm bảo giá trị không trùng nhau giữa các row, nhưng cho phép NULL (tuỳ engine), và một bảng có thể có nhiều unique key.
+### Đọc nhanh trước khi đi sâu
 
-Cả hai đều được engine thực thi bằng một B+ tree index đi kèm. Sự khác biệt cốt lõi là PK là định danh chính, mọi thứ khác (FK, JOIN, clustered index trong InnoDB) đều tham chiếu tới PK. Unique key là ràng buộc phụ, dùng cho các cột có giá trị duy nhất về mặt nghiệp vụ nhưng không phải định danh chính.
+**Ý chính:** Primary key định danh mỗi dòng và là khóa chính của bảng; unique key chỉ yêu cầu các giá trị không trùng.
 
-Trong MySQL InnoDB, PK mặc định là clustered index, mọi secondary index trỏ qua PK. Unique key là secondary index thông thường. Trong PostgreSQL, cả PK và unique đều là non-clustered (heap), đều dùng để enforce constraint. SQL Server cho phép chọn PK là clustered hoặc non-clustered; unique mặc định non-clustered.
+**Ví dụ interview:** user_id là định danh dòng; email có unique constraint để không hai tài khoản dùng cùng email.
 
-```mermaid
-flowchart LR
-    App["Application"]
-    Pk["Primary key<br/>(NOT NULL, một bảng một)"]
-    Uniq["Unique key<br/>(NULL tuỳ engine, nhiều cái)"]
-    Clu["Clustered / heap<br/>(row thật)"]
-    App --> Pk --> Clu
-    App --> Uniq --> Clu
-```
+**Luồng 4 bước:**
 
-*Sơ đồ vị trí: PK và unique key đều là B+ tree index trỏ tới row. Trong InnoDB, PK thường là clustered, unique là secondary. Trong PostgreSQL, cả hai đều non-clustered.*
+1. Ứng dụng gửi query qua driver hoặc connection pool.
+2. Database engine tìm dữ liệu, kiểm tra constraint và xử lý transaction.
+3. Engine dùng index, lock/MVCC và log tùy loại thao tác.
+4. Kết quả được trả về; thay đổi chỉ bền vững sau COMMIT.
 
-### Trả lời 30 giây
-
-"PK là định danh chính của row, không NULL, mỗi bảng chỉ một. Unique key là ràng buộc duy nhất, cho phép NULL tuỳ engine, mỗi bảng có thể nhiều. Cả hai đều dùng B+ tree index để enforce. Trong MySQL InnoDB, PK mặc định là clustered index, secondary index (kể cả unique) trỏ qua PK. Trong PostgreSQL và SQL Server non-clustered, cả PK và unique đều là non-clustered. Khi thiết kế, chọn surrogate key (BIGINT auto-increment) làm PK để tránh update, dùng unique constraint cho natural key (email, số CMND)."
+**Nói như trong interview:** Primary key định danh mỗi dòng và là khóa chính của bảng; unique key chỉ yêu cầu các giá trị không trùng. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Cú pháp khai báo**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

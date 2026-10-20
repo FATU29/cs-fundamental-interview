@@ -65,6 +65,20 @@
     var clean = window.DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
     root.innerHTML = clean;
 
+    // Give the beginner orientation a quieter, readable card so the reader can
+    // start there before entering the denser interview material.
+    // The first h2 is the intentionally beginner-friendly orientation section.
+    // Using its position keeps this working with different marked slugger versions.
+    var beginner = root.querySelector("h2");
+    if (beginner) {
+      beginner.classList.add("beginner-section");
+      var node = beginner.nextElementSibling;
+      while (node && !(node.matches && node.matches("h2"))) {
+        node.classList.add("beginner-section-content");
+        node = node.nextElementSibling;
+      }
+    }
+
     root.querySelectorAll("a[href]").forEach(function (a) {
       a.setAttribute("href", fixUrl(a.getAttribute("href"), true));
     });

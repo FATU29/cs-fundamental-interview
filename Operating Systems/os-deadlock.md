@@ -4,27 +4,36 @@
 
 Chủ đề: Operating Systems · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Lớp phần mềm quản lý CPU, bộ nhớ, tiến trình và thiết bị. Ứng dụng gọi OS thay vì tự điều khiển phần cứng trực tiếp.
+
+**Nói đơn giản:** OS deadlock là vòng chờ tài nguyên giữa các process hoặc thread. Muốn xử lý cần phòng, tránh, phát hiện hoặc phục hồi.
+
+**Từ khóa cần biết:** process = chương trình đang chạy; thread = luồng thực thi; kernel = phần lõi có quyền điều khiển máy.
+
+**Ví dụ dễ hình dung:** Hai process giữ file lock chéo nhau; OS cần timeout, thứ tự lock hoặc phát hiện vòng chờ để giải quyết.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Deadlock là trạng thái một tập luồng (hoặc process) bị chặn vĩnh viễn, mỗi luồng giữ một tài nguyên mà luồng khác trong tập đang chờ, và không luồng nào có thể giải phóng tài nguyên trước khi hoàn tất. Hệ quả: các luồng treo mãi, không có tiến triển, thường kéo theo lỗ hổng hiệu năng hoặc treo ứng dụng.
-    10|
-Bốn điều kiện Coffman cần đồng thời để deadlock xảy ra: (1) mutual exclusion — tài nguyên không chia sẻ được nhiều luồng; (2) hold and wait — luồng giữ tài nguyên rồi xin thêm; (3) no preemption — kernel không cưỡng đoạt tài nguyên; (4) circular wait — chuỗi chờ vòng tròn giữa các luồng. Phá vỡ bất kỳ điều kiện nào cũng phá vỡ deadlock.
+### Đọc nhanh trước khi đi sâu
 
-```mermaid
-flowchart LR
-    App["Application<br/>(multi-thread)"]
-    Lib["Thread library<br/>(pthread, std::thread)"]
-    Ker["Kernel<br/>(scheduler)"]
-    Res["Resources<br/>(mutex, file, socket)"]
-    Det["Deadlock handler<br/>(RAG, timeout)"]
-    App --> Lib --> Ker --> Res --> Det
-```
+**Ý chính:** OS deadlock là vòng chờ tài nguyên giữa các process hoặc thread. Muốn xử lý cần phòng, tránh, phát hiện hoặc phục hồi.
 
-*Sơ đồ vị trí: thread trong process yêu cầu tài nguyên qua kernel; deadlock xảy ra giữa các luồng khi chờ nhau trên các tài nguyên; handler phát hiện hoặc áp đặt timeout.*
+**Ví dụ interview:** Hai process giữ file lock chéo nhau; OS cần timeout, thứ tự lock hoặc phát hiện vòng chờ để giải quyết.
 
-### Trả lời 30 giây
+**Luồng 4 bước:**
 
-"Deadlock xảy ra khi bốn điều kiện cùng đúng: mutual exclusion, hold and wait, no preemption, circular wait. Có bốn chiến lược giải quyết: phủ nhận (ignore — dùng cho hầu hết OS hiện đại vì chi phí thấp), phòng ngừa (phá một trong bốn điều kiện — ví dụ lock theo thứ tự cố định phá circular wait), tránh (Banker algorithm — chỉ cấp tài nguyên nếu giữ trạng thái safe), và phát hiện kèm khôi phục (xây Resource Allocation Graph, định kỳ tìm chu trình, abort một luồng nạn nhân). Trong thực tế pthread, Java, .NET đều mặc định không xử lý deadlock; lập trình viên chịu trách nhiệm lock theo thứ tự, dùng tryLock có timeout, hoặc lock cấp bậc."
+1. Thread giữ một tài nguyên và xin thêm tài nguyên khác.
+2. Thread khác giữ tài nguyên kia và chờ tài nguyên đầu tiên.
+3. Wait-for graph tạo chu trình nên không thread nào tiến được.
+4. Hệ thống phá chu trình bằng thứ tự lock, timeout, prevention hoặc recovery.
+
+**Nói như trong interview:** OS deadlock là vòng chờ tài nguyên giữa các process hoặc thread. Muốn xử lý cần phòng, tránh, phát hiện hoặc phục hồi. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Bốn điều kiện Coffman**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

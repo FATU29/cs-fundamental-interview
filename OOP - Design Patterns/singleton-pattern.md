@@ -4,25 +4,36 @@
 
 Chủ đề: OOP - Design Patterns · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách tổ chức code thành những đối tượng dễ thay đổi. Mục tiêu là giữ luật của nghiệp vụ rõ ràng và tránh code phụ thuộc chặt vào nhau.
+
+**Nói đơn giản:** Singleton giới hạn một class còn một instance trong một process, nhưng global state khiến code khó test và khó scale.
+
+**Từ khóa cần biết:** class = khuôn; object = instance cụ thể; method = hành vi mà object cung cấp.
+
+**Ví dụ dễ hình dung:** Một config loader dùng chung có thể là singleton, nhưng global mutable state khiến test và nhiều tenant khó cô lập.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Singleton là pattern creational đảm bảo class chỉ có duy nhất một instance và cung cấp một điểm truy cập toàn cục (global access point). Pattern giải quyết các tình huống cần shared state (logger, configuration, cache, thread pool) hoặc đối tượng tốn kém để khởi tạo (kết nối database, file system handle). Singleton thuộc nhóm creational trong GoF, nhưng cũng được xem là pattern "controversial" vì khó test và ẩn coupling toàn cục.
+### Đọc nhanh trước khi đi sâu
 
-Trong thực tế, singleton có nhiều biến thể: eager init (tạo instance khi class load), lazy init (tạo khi cần), thread-safe (synchronized, double-checked locking, Bill Pughclass, enum). Mỗi biến thể có trade-off về thread safety, lazy init, performance, và serialization.
+**Ý chính:** Singleton giới hạn một class còn một instance trong một process, nhưng global state khiến code khó test và khó scale.
 
-```mermaid
-flowchart LR
-    C["Client A"] --> S["Singleton"]
-    C2["Client B"] --> S
-    C3["Client C"] --> S
-    S --> I["instance<br/>(duy nhất)"]
-```
+**Ví dụ interview:** Một config loader dùng chung có thể là singleton, nhưng global mutable state khiến test và nhiều tenant khó cô lập.
 
-*Sơ đồ vị trí: nhiều client truy cập cùng một Singleton instance. Instance được khởi tạo một lần và tái sử dụng. Singleton giữ static reference tới instance duy nhất.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Client gọi một contract dễ hiểu.
+2. Object hoặc pattern chọn code thực hiện phía sau contract.
+3. State và dependency được giữ ở nơi có trách nhiệm rõ ràng.
+4. Khi requirement đổi, thay implementation mà giảm ảnh hưởng tới client.
 
-"Singleton đảm bảo một class chỉ có một instance và cung cấp global access point. Cách implement phổ biến trong Java: enum singleton (Joshua Bloch khuyến nghị — thread-safe, serialization-safe, reflection-safe), hoặc Bill Pugh singleton (inner static class holder — lazy + thread-safe không cần synchronized). Trong Python dùng module-level variable; trong JS/TS không có class singleton chuẩn nhưng có thể dùng module cache hoặc global object. Nhược điểm chính: khó test (global state không thể reset), ẩn coupling toàn cục (thay đổi singleton ảnh hưởng mọi client), vi phạm Single Responsibility. Anti-pattern: dùng singleton cho mọi thứ chỉ vì 'dễ truy cập'. Thay thế hiện đại: DI container với scope singleton (Spring `@Service`), giữ testability."
+**Nói như trong interview:** Singleton giới hạn một class còn một instance trong một process, nhưng global state khiến code khó test và khó scale. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Eager Initialization**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

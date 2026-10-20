@@ -4,38 +4,36 @@
 
 Chủ đề: Networking · Ngày: 2026-10-15
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách trình duyệt, ứng dụng và máy chủ gửi dữ liệu cho nhau. Mỗi bước có giao thức, độ trễ và kiểu lỗi riêng.
+
+**Nói đơn giản:** IPv4 dùng địa chỉ 32 bit; IPv6 dùng 128 bit và giải quyết tình trạng thiếu địa chỉ IPv4.
+
+**Từ khóa cần biết:** client = bên gửi request; server = bên phục vụ; packet = mảnh dữ liệu đi qua mạng.
+
+**Ví dụ dễ hình dung:** IPv4 có thể cần NAT vì thiếu địa chỉ; IPv6 cho mỗi thiết bị không gian địa chỉ lớn hơn nhiều.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-### Định nghĩa
+### Đọc nhanh trước khi đi sâu
 
-IPv4 (RFC 791, 1981): địa chỉ 32 bit, header tối thiểu 20 byte, có checksum, router có thể phân mảnh (fragment) gói tin.
+**Ý chính:** IPv4 dùng địa chỉ 32 bit; IPv6 dùng 128 bit và giải quyết tình trạng thiếu địa chỉ IPv4.
 
-IPv6 (RFC 8200, 2017): địa chỉ 128 bit, header cố định 40 byte, không checksum, router không được phân mảnh, dùng ICMPv6 cho mọi thông tin điều khiển (NDP, PMTU, MLD).
+**Ví dụ interview:** IPv4 có thể cần NAT vì thiếu địa chỉ; IPv6 cho mỗi thiết bị không gian địa chỉ lớn hơn nhiều.
 
-Cả hai cùng nằm ở tầng 3 OSI, cùng khái niệm hop và TTL/Hop Limit, cùng được mang trong Ethernet, Wi-Fi, PPP. Khác biệt nằm ở header, phân giải láng giềng, cơ chế chuyển tiếp, và không gian địa chỉ.
+**Luồng 4 bước:**
 
-Giả định: bài viết cho kỹ sư backend/SRE phỏng vấn Senior/Staff. Con số là bậc độ lớn, phụ thuộc OS và kernel. Khác biệt theo implementation sẽ ghi rõ.
+1. Ứng dụng tạo request với tên host, port và dữ liệu.
+2. OS và các giao thức mạng tìm đường rồi chuyển packet tới server.
+3. Server xử lý request và trả response qua kết nối phù hợp.
+4. Client kiểm tra response, cache hoặc render dữ liệu cho người dùng.
 
-### Vị trí trong hệ thống
-
-```mermaid
-flowchart TD
-  APP["Ứng dụng<br/>getaddrinfo, connect"] --> DNS["DNS resolver<br/>A + AAAA record"]
-  APP --> SOCK["Socket API<br/>AF_INET / AF_INET6"]
-  SOCK --> L4["L4: TCP, UDP"]
-  L4 --> L3["L3: IPv4 hoặc IPv6"]
-  L3 --> RT["FIB riêng v4/v6<br/>quyết định next hop"]
-  L3 --> FW["Netfilter<br/>iptables + ip6tables"]
-  L3 --> NBR["Phân giải next hop → MAC<br/>IPv4: ARP | IPv6: NDP/ICMPv6"]
-  NBR --> L2["L2: Ethernet, Wi-Fi<br/>MTU 1500"]
-  FW --> L2
-```
-
-*Sơ đồ: IP nằm giữa socket/L4 và L2; DNS, FIB, netfilter và phân giải MAC đều tách riêng cho v4 và v6.*
-
-### Trả lời 30 giây
-
-"IPv4 và IPv6 cùng làm một việc: mang datagram qua nhiều router. IPv4 dùng địa chỉ 32 bit — đã cạn kiệt từ thập kỷ 2010, buộc dùng NAT để chia sẻ một IP public cho nhiều thiết bị. IPv6 dùng 128 bit — không gian gần vô hạn, mỗi host có IP global, không cần NAT. Về cơ chế, IPv4 dùng ARP (broadcast L2) và có checksum header tính lại mỗi hop; IPv6 dùng NDP qua ICMPv6 (multicast, hiệu quả hơn) và bỏ checksum. IPv6 cấm router phân mảnh, dùng PMTU discovery thay thế. Cả hai cùng tồn tại trong thập kỷ tới, dual-stack là phổ biến nhất, Happy Eyeballs giúp client chọn kết nối nhanh nhất."
+**Nói như trong interview:** IPv4 dùng địa chỉ 32 bit; IPv6 dùng 128 bit và giải quyết tình trạng thiếu địa chỉ IPv4. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **So sánh header IPv4 và IPv6**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

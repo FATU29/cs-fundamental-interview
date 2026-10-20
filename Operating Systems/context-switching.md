@@ -4,28 +4,36 @@
 
 Chủ đề: Operating Systems · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Lớp phần mềm quản lý CPU, bộ nhớ, tiến trình và thiết bị. Ứng dụng gọi OS thay vì tự điều khiển phần cứng trực tiếp.
+
+**Nói đơn giản:** Context switch lưu trạng thái của việc đang chạy rồi nạp trạng thái việc khác, giúp CPU chia thời gian giữa các task.
+
+**Từ khóa cần biết:** process = chương trình đang chạy; thread = luồng thực thi; kernel = phần lõi có quyền điều khiển máy.
+
+**Ví dụ dễ hình dung:** CPU lưu thanh ghi của request A rồi nạp thanh ghi của request B để B tiếp tục đúng chỗ đã dừng.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Context switch là việc kernel dừng task A, lưu toàn bộ CPU state của A vào memory, khôi phục state của task B từ memory, rồi chuyển CPU sang chạy B. CPU state bao gồm: thanh ghi mục đích (rax, rbx, ...), program counter (RIP), stack pointer (RSP), base pointer (RBP), flags (RFLAGS), segment registers, FPU/SIMD state (XSAVE area, ~512 byte), page table root (CR3 trên x86-64), và trên Linux còn FS_BASE/GS_BASE (TLS).
+### Đọc nhanh trước khi đi sâu
 
-Có ba loại context switch: (1) voluntary (task tự nguyện nhường CPU khi syscall blocking, mutex wait, sleep); (2) involuntary (time slice hết, scheduler preempt); (3) interrupt-induced (IRQ wake task khác có priority cao hơn, hoặc scheduler chạy trong IRQ return path). Voluntary rẻ hơn involuntary vì scheduler biết task chuẩn bị nhường.
+**Ý chính:** Context switch lưu trạng thái của việc đang chạy rồi nạp trạng thái việc khác, giúp CPU chia thời gian giữa các task.
 
-Cùng process hai thread: switch chỉ đổi thanh ghi, stack, FPU; page table root giữ nguyên. Khác process: phải đổi page table root → TLB flush (toàn bộ TLB entry cũ invalid, miss cho page đầu tiên), cache pollution (L1/L2 mới cho task khác). Đó là lý do khác process đắt gấp 5-10x.
+**Ví dụ interview:** CPU lưu thanh ghi của request A rồi nạp thanh ghi của request B để B tiếp tục đúng chỗ đã dừng.
 
-```mermaid
-flowchart LR
-    A["Task A<br/>(running)"] -->|"time slice hết /<br/>syscall blocking / IRQ"| SCH["Scheduler"]
-    SCH -->|"save A state<br/>to kernel stack"| K1["task_struct A"]
-    SCH -->|"pick next task B"| K2["task_struct B"]
-    K2 -->|"load B state<br/>to CPU regs"| B["Task B<br/>(running)"]
-    SCH -->|"switch CR3 (nếu khác process)"| MMU["MMU/TLB<br/>flush nếu khác"]
-```
+**Luồng 4 bước:**
 
-*Sơ đồ vị trí: scheduler nằm trong kernel, switch state giữa hai task_struct. Cùng process giữ page table root; khác process phải switch CR3 và flush TLB.*
+1. Scheduler quyết định task hiện tại phải nhường CPU.
+2. Kernel lưu register, program counter và state của task đó.
+3. Kernel nạp state của task tiếp theo và có thể đổi address space.
+4. CPU chạy tiếp task mới; chi phí là thời gian lưu/nạp và cache/TLB bị ảnh hưởng.
 
-### Trả lời 30 giây
-
-"Context switch là lưu CPU state của task A và nạp state task B trong kernel. Voluntary (syscall blocking, mutex) rẻ vì scheduler biết trước; involuntary (time slice) tốn hơn. Cùng process hai thread: ~1 µs; khác process: ~10 µs (vì TLB flush, L1/L2 cache miss). Linux scheduler CFS dùng red-black tree theo vruntime, mỗi task có nice weight, time slice ~10-100 ms tuỳ load. Trigger: time slice hết, mutex wait, syscall blocking, IRQ. Để giảm switch overhead: pin thread tới CPU (affinity), dùng thread pool thay vì tạo thread mỗi task, dùng coroutine cho I/O-bound. Trong benchmark, high-frequency context switch (1k+/s) giảm throughput rõ rệt."
+**Nói như trong interview:** Context switch lưu trạng thái của việc đang chạy rồi nạp trạng thái việc khác, giúp CPU chia thời gian giữa các task. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Trigger switch**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

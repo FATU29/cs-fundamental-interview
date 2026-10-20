@@ -4,27 +4,36 @@
 
 Chủ đề: Database · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nơi ứng dụng lưu dữ liệu và đọc lại dữ liệu. Khó ở chỗ dữ liệu phải đúng khi nhiều người cùng đọc, ghi, hoặc khi máy bị lỗi.
+
+**Nói đơn giản:** Denormalization cố ý lặp hoặc gộp dữ liệu để đọc nhanh hơn, đổi lại việc ghi và đồng bộ trở nên khó hơn.
+
+**Từ khóa cần biết:** row = một dòng dữ liệu; query = câu hỏi gửi database; transaction = một nhóm thay đổi được xử lý cùng nhau.
+
+**Ví dụ dễ hình dung:** Trang danh sách đơn đọc nhanh hơn nếu lưu sẵn customer_name, nhưng đổi tên khách hàng phải cập nhật nhiều dòng.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Denormalization là quyết định thiết kế cố ý phá vỡ dạng chuẩn (1NF-3NF-BCNF) để đổi chi phí ghi lấy tốc độ đọc, đơn giản hoá truy vấn, hoặc giảm tải hệ thống phân tán. Khác với normalization là quy trình dựa trên phụ thuộc hàm, denormalization là một tập kỹ thuật có chủ đích với kiểm soát: thêm cột dẫn xuất, lặp dữ liệu từ bảng khác, precompute tổng hợp, hoặc dùng NoSQL phụ trợ. Quyết định đúng khi workload đọc áp đảo ghi, dữ liệu thay đổi chậm, và lỗi nhất quán có thể chấp nhận trong một khoảng trễ.
+### Đọc nhanh trước khi đi sâu
 
-Giả định: phạm vi là RDBMS với OLTP cao tải đọc và OLAP tổng hợp; không bàn về việc chọn NoSQL thay RDBMS.
+**Ý chính:** Denormalization cố ý lặp hoặc gộp dữ liệu để đọc nhanh hơn, đổi lại việc ghi và đồng bộ trở nên khó hơn.
 
-```mermaid
-flowchart LR
-    W["Workload<br/>đọc > ghi"]
-    Norm["Schema đã 3NF<br/>xem [database-normalization](database-normalization.md)"]
-    Tech["Kỹ thuật denormalize<br/>cột dẫn xuất · lặp · MV · cache"]
-    Opt["Tối ưu đọc<br/>đổi JOIN thành SELECT 1 bảng"]
-    Trade["Trade-off<br/>ghi chậm hơn, lệch tạm thời"]
-    W --> Norm --> Tech --> Opt --> Trade
-```
+**Ví dụ interview:** Trang danh sách đơn đọc nhanh hơn nếu lưu sẵn customer_name, nhưng đổi tên khách hàng phải cập nhật nhiều dòng.
 
-*Sơ đồ vị trí: workload nghiêng đọc thúc đẩy denormalization; mỗi kỹ thuật đi kèm trade-off riêng. Denormalization không thay thế chuẩn hoá mà bổ sung sau khi đã đạt 3NF.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Ứng dụng gửi query qua driver hoặc connection pool.
+2. Database engine tìm dữ liệu, kiểm tra constraint và xử lý transaction.
+3. Engine dùng index, lock/MVCC và log tùy loại thao tác.
+4. Kết quả được trả về; thay đổi chỉ bền vững sau COMMIT.
 
-"Denormalization là cố ý phá chuẩn để đổi ghi lấy đọc. Sau khi đạt 3NF/BCNF, ta thêm cột dẫn xuất (`total_price`, `comment_count`), lặp dữ liệu từ bảng khác (`customer_name` trong `orders`), hoặc precompute tổng hợp vào materialized view. Đánh đổi: ghi chậm hơn vì phải cập nhật nhiều nơi, dữ liệu có thể lệch giữa các bản sao trong vài giây hoặc vài phút. Dùng khi workload đọc áp đảo ghi (dashboard, leaderboard, search) và độ trễ tổng hợp là blocker kinh doanh, không dùng cho transaction path của thanh toán."
+**Nói như trong interview:** Denormalization cố ý lặp hoặc gộp dữ liệu để đọc nhanh hơn, đổi lại việc ghi và đồng bộ trở nên khó hơn. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Sáu kỹ thuật phổ biến**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

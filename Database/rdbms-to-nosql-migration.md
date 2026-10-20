@@ -4,29 +4,36 @@
 
 Chủ đề: Database · Ngày: 2026-10-16
 
-Giả định: source là MySQL (hoặc PostgreSQL) với bảng `orders`, target là DynamoDB (single-region, on-demand). Bài có nhắc MongoDB/Cassandra ở phần cuối để bạn đối chiếu.
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nơi ứng dụng lưu dữ liệu và đọc lại dữ liệu. Khó ở chỗ dữ liệu phải đúng khi nhiều người cùng đọc, ghi, hoặc khi máy bị lỗi.
+
+**Nói đơn giản:** Chuyển từ RDBMS sang NoSQL cần vừa sao chép dữ liệu vừa giữ dịch vụ chạy, rồi kiểm chứng trước khi chuyển traffic.
+
+**Từ khóa cần biết:** row = một dòng dữ liệu; query = câu hỏi gửi database; transaction = một nhóm thay đổi được xử lý cùng nhau.
+
+**Ví dụ dễ hình dung:** Hệ thống cũ vẫn nhận order trong lúc backfill sang store mới; CDC giúp chuyển tiếp các thay đổi mới.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
 
 ## 1. Là gì
 
-Migration RDBMS sang NoSQL đồng thời giữ availability và consistency là một dạng dual-system migration: trong thời gian chuyển, cả RDBMS (hệ thống cũ) và NoSQL (hệ thống mới) đều phải phục vụ traffic, dữ liệu phải đồng bộ giữa hai bên, và phải có cách verify rằng dữ liệu ở NoSQL khớp với RDBMS trước khi cutover. Cốt lõi không phải viết script ETL, mà là thiết kế quy trình có thể rollback nhanh và đảm bảo consistency cuối cùng (cuối migration, hai hệ thống phải khớp nhau).
+### Đọc nhanh trước khi đi sâu
 
-```mermaid
-flowchart LR
-    App["Application"]
-    Old["RDBMS<br/>MySQL/PostgreSQL<br/>(source of truth<br/>trong migration)"]
-    New["NoSQL<br/>DynamoDB<br/>(target)"]
-    Cdc["CDC pipeline<br/>Debezium/Kinesis"]
-    App -- write --> Old
-    Old -- binlog --> Cdc -- write --> New
-    App -. shadow read .-> New
-    App -- read --> Old
-```
+**Ý chính:** Chuyển từ RDBMS sang NoSQL cần vừa sao chép dữ liệu vừa giữ dịch vụ chạy, rồi kiểm chứng trước khi chuyển traffic.
 
-*Sơ đồ vị trí: App ghi vào RDBMS (source of truth), CDC đọc binlog/WAL và ghi vào NoSQL. Shadow read so sánh hai bên. Cutover: đổi read path sang NoSQL khi verify xong.*
+**Ví dụ interview:** Hệ thống cũ vẫn nhận order trong lúc backfill sang store mới; CDC giúp chuyển tiếp các thay đổi mới.
 
-### Trả lời 30 giây
+**Luồng 4 bước:**
 
-"Migration RDBMS sang NoSQL khi hệ thống đang chạy cần CDC-based approach: source RDBMS là source of truth, CDC pipeline (Debezium + Kafka, hoặc AWS DMS) đọc binlog/WAL và ghi vào NoSQL trong khi app tiếp tục ghi vào RDBMS. Tránh dual-write ở app (hai write có thể không nhất quán khi một bên fail). Backfill dữ liệu cũ bằng batch job với snapshot. Verify bằng shadow read: app đọc cả RDBMS và NoSQL, so sánh kết quả, log mismatch. Khi mismatch rate thấp (vd <0.1%) và ổn định, cutover bằng cách đổi read path. Rollback plan: giữ RDBMS làm source of truth, CDC tiếp tục sync, có thể quay lại bất kỳ lúc nào. Consistency model: với NoSQL eventually consistent (DynamoDB), thiết kế idempotent writes và chấp nhận read-after-write có thể chậm."
+1. Ứng dụng gửi query qua driver hoặc connection pool.
+2. Database engine tìm dữ liệu, kiểm tra constraint và xử lý transaction.
+3. Engine dùng index, lock/MVCC và log tùy loại thao tác.
+4. Kết quả được trả về; thay đổi chỉ bền vững sau COMMIT.
+
+**Nói như trong interview:** Chuyển từ RDBMS sang NoSQL cần vừa sao chép dữ liệu vừa giữ dịch vụ chạy, rồi kiểm chứng trước khi chuyển traffic. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Dual-write pitfalls**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

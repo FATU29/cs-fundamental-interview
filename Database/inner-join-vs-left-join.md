@@ -4,34 +4,36 @@
 
 Chủ đề: Database · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nơi ứng dụng lưu dữ liệu và đọc lại dữ liệu. Khó ở chỗ dữ liệu phải đúng khi nhiều người cùng đọc, ghi, hoặc khi máy bị lỗi.
+
+**Nói đơn giản:** INNER JOIN chỉ giữ các dòng có cặp ở cả hai bảng; LEFT JOIN giữ toàn bộ dòng bên trái dù bên phải không có cặp.
+
+**Từ khóa cần biết:** row = một dòng dữ liệu; query = câu hỏi gửi database; transaction = một nhóm thay đổi được xử lý cùng nhau.
+
+**Ví dụ dễ hình dung:** Báo cáo chỉ khách đã thanh toán dùng INNER JOIN; danh sách mọi khách, kể cả chưa có payment, dùng LEFT JOIN.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-INNER JOIN trả về chỉ những dòng mà cả hai phía khớp theo điều kiện ON; LEFT JOIN trả về tất cả dòng bên trái, các cột bên phải là NULL khi không khớp. Cả hai là các phép quan hệ: `A JOIN B ON pred` sinh tập các cặp `(a, b)` thoả mãn `pred`, sau đó chiếu các cột cần. INNER JOIN lọc bỏ phần tử không khớp; LEFT JOIN giữ phần tử bên trái, kể cả khi không có đối ứng. Cùng một truy vấn có thể ra kết quả khác nhau giữa INNER và LEFT, đặc biệt khi có nhiều dòng trùng khớp ở một phía (mỗi dòng bên trái được nhân với mỗi dòng bên phải khớp).
+### Đọc nhanh trước khi đi sâu
 
-Giả định: SQL chuẩn (ISO/IEC 9075); `OUTER APPLY`, `LATERAL` không nằm trong bài này. Mệnh đề JOIN đặt trước mệnh đề WHERE.
+**Ý chính:** INNER JOIN chỉ giữ các dòng có cặp ở cả hai bảng; LEFT JOIN giữ toàn bộ dòng bên trái dù bên phải không có cặp.
 
-```mermaid
-flowchart LR
-    A["A: bảng trái<br/>users"]
-    B["B: bảng phải<br/>orders"]
-    P["Điều kiện<br/>ON a.id = b.user_id"]
-    Inner["INNER JOIN<br/>chỉ dòng khớp cả hai"]
-    Left["LEFT JOIN<br/>giữ mọi dòng A, cột B = NULL nếu không khớp"]
-    Right["RIGHT JOIN<br/>giữ mọi dòng B"]
-    Full["FULL OUTER JOIN<br/>giữ cả hai"]
-    A --> P
-    B --> P
-    P --> Inner
-    P --> Left
-    P --> Right
-    P --> Full
-```
+**Ví dụ interview:** Báo cáo chỉ khách đã thanh toán dùng INNER JOIN; danh sách mọi khách, kể cả chưa có payment, dùng LEFT JOIN.
 
-*Sơ đồ vị trí: từ hai bảng và điều kiện ON, SQL định nghĩa bốn phép JOIN chính. Bài này tập trung INNER và LEFT, hai phép hay gặp nhất trong phỏng vấn và production.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. SQL chọn bảng trái và bảng phải.
+2. Engine so sánh các cột join theo điều kiện ON.
+3. INNER JOIN bỏ dòng không có cặp; LEFT JOIN giữ dòng trái và điền NULL bên phải.
+4. WHERE, index và số dòng quyết định kết quả và chi phí query.
 
-"INNER JOIN chỉ trả dòng khi cả hai phía khớp điều kiện ON. LEFT JOIN giữ mọi dòng bên trái; cột bên phải là NULL khi không có khớp. Cùng truy vấn có thể trả số dòng rất khác nhau giữa hai phép. Một bẫy hay gặp: đặt điều kiện lọc cột bên phải vào WHERE thay vì ON ở LEFT JOIN, vô tình biến LEFT JOIN thành INNER JOIN. NULL phát sinh từ JOIN có thể phá hàm SUM/COUNT; cần xử lý bằng `COUNT(b.x)` đếm chỉ khi khớp, hoặc `COALESCE(b.x, 0)`. Algorithm vật lý: nested loop cho bảng nhỏ, hash join cho bảnh vừa, merge join cho cả hai đã sort."
+**Nói như trong interview:** INNER JOIN chỉ giữ các dòng có cặp ở cả hai bảng; LEFT JOIN giữ toàn bộ dòng bên trái dù bên phải không có cặp. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Bảng mẫu và quan hệ**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

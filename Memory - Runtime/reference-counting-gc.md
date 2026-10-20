@@ -4,29 +4,36 @@
 
 Chủ đề: Memory - Runtime · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách chương trình dùng và thu hồi bộ nhớ khi đang chạy. Hiểu phần này giúp giải thích chậm, treo, crash và out-of-memory.
+
+**Nói đơn giản:** Reference counting giữ số lượng reference tới mỗi object và giải phóng ngay khi số này về 0, nhưng cần cách xử lý vòng tham chiếu.
+
+**Từ khóa cần biết:** object = dữ liệu đang sống; reference = đường trỏ tới object; runtime = phần thực thi chương trình.
+
+**Ví dụ dễ hình dung:** Hai object trỏ vòng vào nhau nên mỗi refcount vẫn là 1 dù chương trình không thể truy cập chúng nữa.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Reference counting (refcount) là chiến lược GC trong đó mỗi object gắn một bộ đếm refcount, mỗi tham chiếu (reference) tăng hoặc giảm bộ đếm đó. Khi refcount về 0 nghĩa là không còn cách nào truy cập được, object được giải phóng tức thì trên chính thread đang drop reference. Quy tắc:
+### Đọc nhanh trước khi đi sâu
 
-- Tạo object: refcount = 1 (nếu gán cho biến đầu tiên).
-- Gán `a = b`: refcount của b tăng 1; refcount của a cũ giảm 1; nếu a cũ về 0 thì giải phóng.
-- Hàm trả object: tăng refcount trước khi trả, caller giảm khi xong.
+**Ý chính:** Reference counting giữ số lượng reference tới mỗi object và giải phóng ngay khi số này về 0, nhưng cần cách xử lý vòng tham chiếu.
 
-Một số engine dùng refcount làm chiến lược chính: CPython (chính), Objective-C/Swift thông qua ARC (Automatic Reference Counting), C++ `std::shared_ptr`, Rust `Rc<T>`. Thực tế phổ biến là refcount được kết hợp với một bộ phận khác (cycle collector, mark-sweep, generational) để xử lý chu kỳ.
+**Ví dụ interview:** Hai object trỏ vòng vào nhau nên mỗi refcount vẫn là 1 dù chương trình không thể truy cập chúng nữa.
 
-```mermaid
-flowchart LR
-    A["biến a"] -->|refcount +1| O["object O<br/>refcount = 2"]
-    B["biến b"] -->|refcount +1| O
-    O -->|refcount -1 khi a = nil| A2["a = nil"]
-    O -->|refcount 1 → 0| Free["free(O)<br/>chạy ngay"]
-```
+**Luồng 4 bước:**
 
-*Sơ đồ vị trí: refcount nằm trong header object; ngôn ngữ/runtime tăng giảm khi gán; khi về 0 thì free ngay tại thread hiện tại.*
+1. Code tạo object hoặc vùng nhớ.
+2. Runtime giữ object còn được dùng và cung cấp reference cho code.
+3. Object không còn reachable sẽ được free hoặc garbage collector thu hồi.
+4. Nếu giữ nhầm, vùng nhớ phình lên và chương trình chậm hoặc hết RAM.
 
-### Trả lời 30 giây
-
-"Refcount là chiến lược GC đếm số tham chiếu trỏ tới mỗi object. Khi đếm về 0, object giải phóng ngay trên thread đang thực hiện, không cần dừng chương trình. Ưu: deterministic, overhead thấy được, free ngay khi không dùng, tốt cho resource (file, socket) cần close tức thì. Nhược: phải tăng/giảm ở mọi nơi (chi phí CPU + bộ nhớ cho counter), không thu dọn được chu kỳ A→B→A, không di dời object dẫn tới phân mảnh heap. CPython dùng refcount + cycle collector; Swift ARC chỉ refcount; C++ `shared_ptr` chỉ refcount nhưng tránh chu kỳ bằng `weak_ptr`. Trong phỏng vấn hiếm khi ai thiết kế VM refcount từ đầu, nhưng hiểu nó giúp trả lời câu hỏi về overhead allocator hay deterministic teardown."
+**Nói như trong interview:** Reference counting giữ số lượng reference tới mỗi object và giải phóng ngay khi số này về 0, nhưng cần cách xử lý vòng tham chiếu. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Cấu trúc object và refcount**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

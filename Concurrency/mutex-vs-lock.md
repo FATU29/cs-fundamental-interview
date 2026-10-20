@@ -4,33 +4,36 @@
 
 Chủ đề: Concurrency · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nhiều việc cùng chạy trong một chương trình. Khó ở chỗ các việc có thể chạm cùng dữ liệu và làm kết quả sai nếu không phối hợp.
+
+**Nói đơn giản:** Lock là tên chung cho cơ chế bảo vệ dữ liệu; mutex là loại lock chỉ cho một luồng vào vùng quan trọng tại một thời điểm.
+
+**Từ khóa cần biết:** thread = luồng chạy; shared state = dữ liệu dùng chung; synchronization = cách phối hợp luồng.
+
+**Ví dụ dễ hình dung:** Hai request cùng sửa số dư tài khoản cần một mutex để chỉ một request đọc-sửa-ghi tại một thời điểm.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-**Mutex** là primitive đồng bộ bảo đảm mutual exclusion: chỉ duy nhất một thread ở trong critical section tại một thời điểm. POSIX `pthread_mutex_t`, Windows `CRITICAL_SECTION`/`HANDLE Mutex`, Java `synchronized`/`ReentrantLock`, C++ `std::mutex` đều có semantic chung: thread lấy được khóa thì vào; khóa đang bị giữ thì các thread khác phải chờ cho tới khi thread giữ nhả ra. Mutex thường có **ownership** — chỉ thread đã lock mới unlock được; nếu thread khác unlock sẽ là hành vi không xác định.
+### Đọc nhanh trước khi đi sâu
 
-**Lock** là thuật ngữ chung cho mọi cơ chế ngăn truy cập đồng thời. Mutex là một loại lock; spinlock là một lock khác (chờ bằng busy-wait); rwlock cho phép nhiều reader cùng lúc; semaphore đếm được số holder; futex là lock user-space + kernel kết hợp. Khi ai đó nói "lock" trong bối cảnh OS/threading, họ thường muốn nói mutex.
+**Ý chính:** Lock là tên chung cho cơ chế bảo vệ dữ liệu; mutex là loại lock chỉ cho một luồng vào vùng quan trọng tại một thời điểm.
 
-```mermaid
-flowchart TD
-    Lock["Lock (khái niệm chung)"]
-    Mutex["Mutex<br/>1 holder, ownership"]
-    Spin["Spinlock<br/>busy-wait, không sleep"]
-    RWLock["RWLock<br/>N readers hoặc 1 writer"]
-    Sem["Semaphore<br/>counter N"]
-    Futex["Futex<br/>user-space + kernel"]
-    Lock --> Mutex
-    Lock --> Spin
-    Lock --> RWLock
-    Lock --> Sem
-    Lock --> Futex
-    Mutex --> Futex
-```
+**Ví dụ interview:** Hai request cùng sửa số dư tài khoản cần một mutex để chỉ một request đọc-sửa-ghi tại một thời điểm.
 
-*Sơ đồ vị trí: "lock" là khái niệm chung; mutex, spinlock, rwlock, semaphore, futex là các loại lock cụ thể. Mutex trong OS hiện đại thường được build trên futex.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Có nhiều task cùng chạy.
+2. Các task chạm vào dữ liệu hoặc tài nguyên chung.
+3. Chương trình dùng message passing, atomic hoặc lock để phối hợp.
+4. Task tiếp tục và kết quả không bị mất, trùng hoặc kẹt.
 
-"Mutex là một loại lock với hai đặc điểm: mutual exclusion (một thread tại một thời điểm) và ownership (chỉ thread đã lock mới unlock được). 'Lock' là thuật ngữ chung — mutex, spinlock, rwlock, semaphore, futex đều là lock. Khác biệt vận hành: mutex thường ngủ khi phải chờ, chuyển context; spinlock giữ CPU busy-wait nên rẻ cho thời gian chờ cực ngắn và đắt khi chờ lâu; rwlock cho phép nhiều reader cùng lúc nên tốt cho workload đọc nhiều; semaphore đếm được nhiều holder — phù hợp resource pool; futex là kết hợp user-space check + kernel sleep, là nền tảng của mutex Linux hiện đại. Trong phỏng vấn Senior, hỏi 'mutex vs lock' thường là kiểm tra bạn có hiểu ownership, blocking, fairness và recursive lock."
+**Nói như trong interview:** Lock là tên chung cho cơ chế bảo vệ dữ liệu; mutex là loại lock chỉ cho một luồng vào vùng quan trọng tại một thời điểm. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Mutex có hai mức: fast path và slow path**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

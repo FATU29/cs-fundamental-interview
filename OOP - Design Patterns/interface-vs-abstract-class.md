@@ -4,25 +4,36 @@
 
 Chủ đề: OOP - Design Patterns · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách tổ chức code thành những đối tượng dễ thay đổi. Mục tiêu là giữ luật của nghiệp vụ rõ ràng và tránh code phụ thuộc chặt vào nhau.
+
+**Nói đơn giản:** Interface chủ yếu mô tả contract; abstract class có thể chia sẻ state và code chung cho các class con.
+
+**Từ khóa cần biết:** class = khuôn; object = instance cụ thể; method = hành vi mà object cung cấp.
+
+**Ví dụ dễ hình dung:** Nhiều payment provider cùng implement interface; một abstract class phù hợp khi chúng thật sự chia sẻ state và flow chung.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Cả hai là cơ chế khai báo contract (method mà subtype phải implement) ở Java/C# và các ngôn ngữ OOP khác. Tuy nhiên:
+### Đọc nhanh trước khi đi sâu
 
-- **Interface**: contract thuần; phiên bản cổ (Java trước 8, C# trước 8) chỉ có abstract method và constant. Phiên bản hiện đại thêm default method (có thân), static method, private method (Java 9+).
-- **Abstract class**: class có thể có state (field), constructor, method có thân, abstract method. Có thể kế thừa một abstract class duy nhất (single inheritance trong Java/C#).
+**Ý chính:** Interface chủ yếu mô tả contract; abstract class có thể chia sẻ state và code chung cho các class con.
 
-```mermaid
-flowchart LR
-    If["Interface<br/>(contract thuần,<br/>không/ít state)"]
-    Abs["Abstract class<br/>(contract + state<br/>+ partial impl)"]
-    If -->|"class implement"| C1
-    Abs -->|"class extend"| C2
-```
+**Ví dụ interview:** Nhiều payment provider cùng implement interface; một abstract class phù hợp khi chúng thật sự chia sẻ state và flow chung.
 
-*Sơ đồ vị trí: class implement interface (nhiều interface) hoặc extend abstract class (một); interface nghiêng về contract thuần, abstract class cho phép share state và partial implementation.*
-### Trả lời 30 giây
+**Luồng 4 bước:**
 
-"Java trước 8: interface chỉ có method abstract và constant public static final, abstract class có field, constructor, method có thân, abstract method. Từ Java 8 interface có thêm default method có thân (cho phép evolve API mà không phá implement cũ) và static method. Từ Java 9 thêm private method (helper trong interface). C# 8+ cũng có default interface method (DIM) - nhưng implementation trừu tượng mặc định cho interface không tham gia diamond với class. Quy tắc: dùng interface cho contract (IS-A role, nhiều role), abstract class cho share code giữa các lớp cùng hierarchy (IS-A identity, single base, có state dùng chung). Java class chỉ extend được một class (kể cả abstract), nhưng implement nhiều interface - dùng để mô phỏng mixin. Từ Java 8, default method cho phép 'mixin' thật - multiple inheritance cùng giải diamond resolution."
+1. Client gọi một contract dễ hiểu.
+2. Object hoặc pattern chọn code thực hiện phía sau contract.
+3. State và dependency được giữ ở nơi có trách nhiệm rõ ràng.
+4. Khi requirement đổi, thay implementation mà giảm ảnh hưởng tới client.
+
+**Nói như trong interview:** Interface chủ yếu mô tả contract; abstract class có thể chia sẻ state và code chung cho các class con. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Khai báo và từ khoá**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

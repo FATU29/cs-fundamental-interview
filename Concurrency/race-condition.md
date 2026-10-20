@@ -4,34 +4,36 @@
 
 Chủ đề: Concurrency · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nhiều việc cùng chạy trong một chương trình. Khó ở chỗ các việc có thể chạm cùng dữ liệu và làm kết quả sai nếu không phối hợp.
+
+**Nói đơn giản:** Race condition xảy ra khi kết quả phụ thuộc vào việc luồng nào chạy trước. Ví dụ hai luồng cùng tăng một bộ đếm nhưng một lần tăng bị mất.
+
+**Từ khóa cần biết:** thread = luồng chạy; shared state = dữ liệu dùng chung; synchronization = cách phối hợp luồng.
+
+**Ví dụ dễ hình dung:** Hai người cùng bấm mua món cuối cùng. Nếu không đồng bộ, cả hai có thể được báo mua thành công dù kho chỉ còn một.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Race condition là tình trạng hai hoặc nhiều luồng thực thi đồng thời truy cập shared state, và kết quả cuối cùng phụ thuộc vào thứ tự xen kẽ không xác định. Nếu thứ tự khác nhau có thể dẫn đến kết quả khác nhau (có thể sai), đó là race. Race condition là một class của lỗi, không phải lỗi cụ thể — nó phụ thuộc timing CPU, OS scheduling, ngẫu nhiên khi reproduce.
+### Đọc nhanh trước khi đi sâu
 
-Race có ba dạng hay gặp:
-1. **Read-modify-write**: hai thread cùng đọc giá trị cũ, mỗi bên ghi giá trị mới dựa trên bản đọc của mình → mất update.
-2. **Check-then-act**: thread A kiểm tra điều kiện (`if (map.contains(k))`), giữa lúc kiểm tra và lúc hành động, thread B đổi map → A hành động trên state sai.
-3. **Publication**: thread A ghi object, thread B đọc pointer tới object mà chưa đảm bảo memory ordering → B thấy object chưa fully constructed.
+**Ý chính:** Race condition xảy ra khi kết quả phụ thuộc vào việc luồng nào chạy trước. Ví dụ hai luồng cùng tăng một bộ đếm nhưng một lần tăng bị mất.
 
-Câu gộp theo kế hoạch: "How would you handle concurrency / race conditions when streaming from multiple devices at the same time?" — đây là tình huống thực tế nhiều goroutine/thread đọc dữ liệu từ nhiều nguồn (camera, sensor, network) cùng lúc và đẩy vào buffer/processor chung. Race phổ biến: buffer đầy, nhiều producer chen vào, counter count sai, message trùng/mất.
+**Ví dụ interview:** Hai người cùng bấm mua món cuối cùng. Nếu không đồng bộ, cả hai có thể được báo mua thành công dù kho chỉ còn một.
 
-```mermaid
-flowchart TD
-    Dev1["Device 1"] --> R1["Reader goroutine 1"]
-    Dev2["Device 2"] --> R2["Reader goroutine 2"]
-    Dev3["Device 3"] --> R3["Reader goroutine 3"]
-    R1 --> Q["Shared buffer / queue<br/>(race point)"]
-    R2 --> Q
-    R3 --> Q
-    Q --> P["Processor / consumer"]
-    P --> Sink["Sink<br/>(DB, file, network)"]
-```
+**Luồng 4 bước:**
 
-*Sơ đồ vị trí: mỗi device có 1 goroutine/thread đọc dữ liệu, đẩy vào shared buffer. Buffer là điểm race nếu không đồng bộ. Đồng bộ = mutex trên buffer, hoặc channel queue (message passing), hoặc ring buffer lock-free.*
+1. Có nhiều task cùng chạy.
+2. Các task chạm vào dữ liệu hoặc tài nguyên chung.
+3. Chương trình dùng message passing, atomic hoặc lock để phối hợp.
+4. Task tiếp tục và kết quả không bị mất, trùng hoặc kẹt.
 
-### Trả lời 30 giây
-
-"Race condition là lỗi khi kết quả chương trình phụ thuộc thứ tự xen kẽ giữa các thread truy cập shared state. Ví dụ cổ điển: hai thread cùng `count++` (read-modify-write), kết quả cuối có thể là 1 thay vì 2. Phòng bằng bốn cách chính: (1) loại bỏ shared state — immutable data + message passing qua channel; (2) atomic primitive — `fetch_add`, CAS từ bài [compare-and-swap](compare-and-swap.md) cho counter/increment; (3) mutex/condition variable cho critical section; (4) transaction database. Trường hợp streaming từ nhiều device: dùng bounded channel/queue có mutex hoặc lock-free ring buffer, mỗi goroutine chỉ producer vào queue, 1 consumer goroutine xử lý tuần tự — vừa tránh race vừa bounded memory và back-pressure tự nhiên."
+**Nói như trong interview:** Race condition xảy ra khi kết quả phụ thuộc vào việc luồng nào chạy trước. Ví dụ hai luồng cùng tăng một bộ đếm nhưng một lần tăng bị mất. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Ba dạng race cốt lõi**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

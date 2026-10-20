@@ -4,31 +4,36 @@
 
 Chủ đề: Operating Systems · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Lớp phần mềm quản lý CPU, bộ nhớ, tiến trình và thiết bị. Ứng dụng gọi OS thay vì tự điều khiển phần cứng trực tiếp.
+
+**Nói đơn giản:** Priority inversion xảy ra khi task ưu tiên cao phải chờ task ưu tiên thấp, trong khi task trung gian liên tục chiếm CPU.
+
+**Từ khóa cần biết:** process = chương trình đang chạy; thread = luồng thực thi; kernel = phần lõi có quyền điều khiển máy.
+
+**Ví dụ dễ hình dung:** UI task ưu tiên cao chờ mutex của task nền, nhưng task trung gian chiếm CPU khiến task nền không chạy để nhả mutex.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Priority inversion là tình huống luồng ưu tiên cao bị chặn bởi luồng ưu tiên thấp đang giữ mutex, trong khi một luồng ưu tiên trung bình chạy xen vào, kéo dài thời gian chờ của luồng cao. Hệ quả: thời gian chờ phụ thuộc hành vi luồng trung — không thể đảm bảo deadline real-time.
-    10|
-Ba tác nhân: luồng cao (H), luồng thấp (L), luồng trung (M). L giữ mutex, H xin mutex → H đợi. Scheduler đánh thức M (vì M > L), M preempt L, M chạy lâu → L không nhả mutex → H tiếp tục chờ. Cả ba vẫn "sống", nhưng thời gian chờ H vượt tầm kiểm soát.
+### Đọc nhanh trước khi đi sâu
 
-```mermaid
-flowchart LR
-    Sched["Scheduler<br/>(priority-based)"]
-    H["Thread H<br/>(high priority)"]
-    M["Thread M<br/>(medium priority)"]
-    L["Thread L<br/>(low priority)"]
-    Mut["Mutex<br/>(shared resource)"]
-    H -.xin.-> Mut
-    L -.giữ.-> Mut
-    Sched --> H
-    Sched --> M
-    Sched --> L
-```
+**Ý chính:** Priority inversion xảy ra khi task ưu tiên cao phải chờ task ưu tiên thấp, trong khi task trung gian liên tục chiếm CPU.
 
-*Sơ đồ vị trí: scheduler phân phối CPU theo priority; L giữ mutex, H xin mutex và đợi; M preempt L trong lúc L đang giữ mutex — kéo dài thời gian chờ của H vượt dự kiến.*
+**Ví dụ interview:** UI task ưu tiên cao chờ mutex của task nền, nhưng task trung gian chiếm CPU khiến task nền không chạy để nhả mutex.
 
-### Trả lời 30 giây
+**Luồng 4 bước:**
 
-"Priority inversion xảy ra khi luồng ưu tiên cao chờ luồng ưu tiên thấp giữ mutex, và luồng ưu tiên trung bình preempt luồng thấp trước khi luồng thấp nhả mutex. Hệ quả: thời gian chờ của luồng cao bị kéo dài vô tận. Ví dụ nổi tiếng: Mars Pathfinder (1997) bị system reset nhiều lần do priority inversion trong bus task. Ba giải pháp chính: (1) priority inheritance — luồng thấp tạm thời được nâng priority bằng luồng cao nhất đang chờ mutex, đảm bảo nó không bị preempt; (2) priority ceiling — mỗi mutex có priority cố định, luồng giữ mutex chạy ở ceiling; (3) disable preemption trong critical section — đơn giản nhưng giảm concurrency. Linux pthread hỗ trợ `PTHREAD_PRIO_INHERIT` qua `pthread_mutexattr_setprotocol`; RTOS như VxWorks/FreeRTOS dùng priority inheritance mặc định."
+1. Task ưu tiên thấp giữ mutex.
+2. Task ưu tiên cao cần mutex nên bị block.
+3. Task ưu tiên trung bình chiếm CPU, làm task thấp không chạy để nhả mutex.
+4. Priority inheritance hoặc priority ceiling nâng task thấp để giải phóng mutex.
+
+**Nói như trong interview:** Priority inversion xảy ra khi task ưu tiên cao phải chờ task ưu tiên thấp, trong khi task trung gian liên tục chiếm CPU. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Timeline priority inversion cổ điển**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

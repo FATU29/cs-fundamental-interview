@@ -4,32 +4,36 @@
 
 Chủ đề: OOP - Design Patterns · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách tổ chức code thành những đối tượng dễ thay đổi. Mục tiêu là giữ luật của nghiệp vụ rõ ràng và tránh code phụ thuộc chặt vào nhau.
+
+**Nói đơn giản:** Inheritance biểu diễn quan hệ is-a; composition ghép các object nhỏ thành object lớn và thường dễ thay đổi hơn.
+
+**Từ khóa cần biết:** class = khuôn; object = instance cụ thể; method = hành vi mà object cung cấp.
+
+**Ví dụ dễ hình dung:** Bird có thể kế thừa Animal, nhưng ghép Order với PaymentPolicy thường linh hoạt hơn việc tạo quá nhiều subclass.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Inheritance là cơ chế class con kế thừa state (field) và behavior (method) từ class cha, đồng thời có thể mở rộng hoặc override. Quan hệ giữa cha-con là "is-a" (Dog is-a Animal). Java dùng từ khoá `extends` cho class (đơn kế thừa) và `implements` cho interface (đa kế thừa). C++ cho phép đa kế thừa class; Python cũng vậy.
+### Đọc nhanh trước khi đi sâu
 
-```mermaid
-classDiagram
-    class Animal {
-        +String name
-        +makeSound() void
-    }
-    class Dog {
-        +fetch()
-        +makeSound() void
-    }
-    class Puppy {
-        +play()
-    }
-    Animal <|-- Dog
-    Dog <|-- Puppy
-```
+**Ý chính:** Inheritance biểu diễn quan hệ is-a; composition ghép các object nhỏ thành object lớn và thường dễ thay đổi hơn.
 
-*Sơ đồ vị trí: `Animal` là lớp cha. `Dog extends Animal` thừa hưởng `name`, `makeSound()`, override `makeSound()`. `Puppy extends Dog` là đa tầng. Java không cho đa kế thừa class — mỗi class chỉ có một `extends`.*
+**Ví dụ interview:** Bird có thể kế thừa Animal, nhưng ghép Order với PaymentPolicy thường linh hoạt hơn việc tạo quá nhiều subclass.
 
-### Trả lời 30 giây
+**Luồng 4 bước:**
 
-"Inheritance là quan hệ 'is-a': class con kế thừa field và method từ class cha, có thể override hoặc mở rộng. Java đơn kế thừa class (`extends Animal`) nhưng đa kế thừa interface (`implements Flyable, Swimmable`). Java KHÔNG hỗ trợ đa kế thừa class vì diamond problem: nếu class C kế thừa cả A và B mà A và B cùng override method từ grandparent → không rõ dùng bản nào. Java giải quyết qua interface (Java 8+ default method vẫn có xung đột, compiler yêu cầu override). Composition over inheritance là nguyên tắc: thay vì `Dog extends AnimalRepository` (Dog có Repository), dùng `Dog has-a AnimalRepository` (Dog giữ reference Repository) — linh hoạt hơn, tránh phá vỡ khi thay đổi class cha."
+1. Client gọi một contract dễ hiểu.
+2. Object hoặc pattern chọn code thực hiện phía sau contract.
+3. State và dependency được giữ ở nơi có trách nhiệm rõ ràng.
+4. Khi requirement đổi, thay implementation mà giảm ảnh hưởng tới client.
+
+**Nói như trong interview:** Inheritance biểu diễn quan hệ is-a; composition ghép các object nhỏ thành object lớn và thường dễ thay đổi hơn. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Cú pháp và quy tắc Java**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

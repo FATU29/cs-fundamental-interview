@@ -4,23 +4,36 @@
 
 Chủ đề: Database · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nơi ứng dụng lưu dữ liệu và đọc lại dữ liệu. Khó ở chỗ dữ liệu phải đúng khi nhiều người cùng đọc, ghi, hoặc khi máy bị lỗi.
+
+**Nói đơn giản:** Connection pool giữ sẵn các kết nối database để request dùng lại, thay vì mở một kết nối mới cho mỗi request.
+
+**Từ khóa cần biết:** row = một dòng dữ liệu; query = câu hỏi gửi database; transaction = một nhóm thay đổi được xử lý cùng nhau.
+
+**Ví dụ dễ hình dung:** Mỗi request dùng một connection có sẵn, trả lại pool sau khi xong; request không phải bắt tay TCP và xác thực database lại.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Connection pool là một vùng đệm giữ sẵn một tập kết nối (TCP socket + session state) tới database server, để application lấy-ra/trả-vào thay vì mở kết nối mới cho mỗi request. Lý do: TCP handshake + TLS + auth + "làm nóng" session (cache plan, parse, pool buffer của server) tốn vài chục mili-giây đến hàng trăm mili-giây cho mỗi kết nối mới, trong khi cùng workload trên connection đã warm chỉ tốn ~1 ms cho query ngắn. Pool cho phép giới hạn số kết nối thật tới server (để server không chết dưới tải) đồng thời che giấu chi phí mở kết nối với application.
+### Đọc nhanh trước khi đi sâu
 
-```mermaid
-flowchart LR
-    App["Application<br/>(HTTP handler,<br/>worker)"]
-    Pool["Connection pool<br/>(HikariCP / PgBouncer /<br/>app-side)"]
-    Db["DB server<br/>(PG process /<br/>MySQL thread)"]
-    App --> Pool --> Db
-```
+**Ý chính:** Connection pool giữ sẵn các kết nối database để request dùng lại, thay vì mở một kết nối mới cho mỗi request.
 
-*Sơ đồ vị trí: Application mượn connection từ pool; pool giữ sẵn N socket tới DB và cho application đặt hàng vào hàng chờ khi hết. DB server chỉ nhìn thấy tối đa N connection thật.*
+**Ví dụ interview:** Mỗi request dùng một connection có sẵn, trả lại pool sau khi xong; request không phải bắt tay TCP và xác thực database lại.
 
-### Trả lời 30 giây
+**Luồng 4 bước:**
 
-"Connection pool giữ sẵn một tập TCP socket tới database để khỏi mở/đóng cho mỗi request, vì TCP+TLS+auth tốn ~5-100 ms mỗi lần mở và server-side state cũng cần warm-up. App lấy một connection từ pool, chạy query, trả lại. Heuristic size: `pool ≈ ((core_count × 2) + effective_spindle_count)` theo HikariCP wiki, và nên chỉnh theo quan sát thật. PostgreSQL dùng một process per connection nên pool nên nhỏ (vài chục); MySQL dùng thread per connection nên chịu được vài trăm tới vài nghìn connection. Pool có thể đặt trong app (HikariCP, c3p0, Druid) hoặc trong proxy ngoài (PgBouncer, ProxySQL, RDS Proxy)."
+1. Request xin một connection rảnh từ pool.
+2. Pool tạo mới hoặc chờ nếu đã chạm giới hạn.
+3. Request dùng connection để query trong thời gian ngắn.
+4. Sau khi xong, connection được reset và trả về pool cho request khác.
+
+**Nói như trong interview:** Connection pool giữ sẵn các kết nối database để request dùng lại, thay vì mở một kết nối mới cho mỗi request. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Vì sao mỗi connection tốn**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

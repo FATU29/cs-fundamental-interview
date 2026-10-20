@@ -4,30 +4,36 @@
 
 Chủ đề: OOP - Design Patterns · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách tổ chức code thành những đối tượng dễ thay đổi. Mục tiêu là giữ luật của nghiệp vụ rõ ràng và tránh code phụ thuộc chặt vào nhau.
+
+**Nói đơn giản:** Factory gom quyết định tạo object vào một chỗ, để code gọi không phải biết class cụ thể nào sẽ được tạo.
+
+**Từ khóa cần biết:** class = khuôn; object = instance cụ thể; method = hành vi mà object cung cấp.
+
+**Ví dụ dễ hình dung:** Ứng dụng chọn Stripe hoặc PayPal theo config, còn client chỉ gọi factory.createGateway().
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Factory pattern là pattern creational định nghĩa interface hoặc method để tạo object, nhưng để subclass (hoặc implementation) quyết định class cụ thể nào sẽ được khởi tạo. Pattern này đẩy logic khởi tạo ra khỏi client, giúp client chỉ phụ thuộc vào interface, không phụ thuộc vào concrete class. Khi thêm class mới, chỉ cần thêm factory method/subclass, không sửa code gọi.
+### Đọc nhanh trước khi đi sâu
 
-Factory có ba biến thể chính: Simple Factory (static method tạo object — không phải pattern GoF chính thức), Factory Method (define method abstract, subclass override), Abstract Factory (tạo họ sản phẩm liên quan). Mỗi biến thể có use case riêng.
+**Ý chính:** Factory gom quyết định tạo object vào một chỗ, để code gọi không phải biết class cụ thể nào sẽ được tạo.
 
-```mermaid
-flowchart LR
-    C["Client"]
-    F["Factory<br/>(create method)"]
-    P1["Product A"]
-    P2["Product B"]
-    P3["Product C"]
-    C --> F
-    F --> P1
-    F --> P2
-    F --> P3
-```
+**Ví dụ interview:** Ứng dụng chọn Stripe hoặc PayPal theo config, còn client chỉ gọi factory.createGateway().
 
-*Sơ đồ vị trí: Client gọi Factory.create(); Factory quyết định instantiate Product A/B/C nào dựa vào tham số. Client chỉ biết interface Product, không biết class cụ thể.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Client gọi một contract dễ hiểu.
+2. Object hoặc pattern chọn code thực hiện phía sau contract.
+3. State và dependency được giữ ở nơi có trách nhiệm rõ ràng.
+4. Khi requirement đổi, thay implementation mà giảm ảnh hưởng tới client.
 
-"Factory pattern giải quyết vấn đề client phải biết class cụ thể khi tạo object, hoặc logic khởi tạo phức tạp cần tách riêng. Có ba biến thể: Simple Factory (static method, đơn giản nhất), Factory Method (define abstract method, subclass quyết định class — GoF chính thức), Abstract Factory (tạo cả họ sản phẩm liên quan, ví dụ UI factory tạo Button + Checkbox + TextField theo theme). Ví dụ thực tế: `Calendar.getInstance()` trong Java; `LoggerFactory.getLogger()` trong SLF4J; repository factory trong Spring Data. Lợi ích chính: dễ extend (thêm product mới không sửa client), dễ test (inject factory mock). Nhược điểm: thêm 1 lớp, tăng indirection."
+**Nói như trong interview:** Factory gom quyết định tạo object vào một chỗ, để code gọi không phải biết class cụ thể nào sẽ được tạo. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Simple Factory (static factory)**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

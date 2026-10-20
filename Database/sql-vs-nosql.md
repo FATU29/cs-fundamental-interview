@@ -4,33 +4,36 @@
 
 Chủ đề: Database · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nơi ứng dụng lưu dữ liệu và đọc lại dữ liệu. Khó ở chỗ dữ liệu phải đúng khi nhiều người cùng đọc, ghi, hoặc khi máy bị lỗi.
+
+**Nói đơn giản:** SQL dùng bảng và quan hệ rõ ràng; NoSQL có nhiều kiểu dữ liệu khác nhau và thường ưu tiên scale hoặc cách truy cập cụ thể.
+
+**Từ khóa cần biết:** row = một dòng dữ liệu; query = câu hỏi gửi database; transaction = một nhóm thay đổi được xử lý cùng nhau.
+
+**Ví dụ dễ hình dung:** Báo cáo nhiều JOIN hợp với SQL; session theo user_id với schema đơn giản có thể hợp với key-value store.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-SQL là hệ quản trị CSDL quan hệ dùng schema cố định (bảng, cột, kiểu dữ liệu), ngôn ngữ truy vấn SQL chuẩn ISO, và đảm bảo ACID cho transaction. NoSQL là tập hợp nhiều mô hình dữ liệu khác quan hệ (key-value, document, wide-column, graph), mỗi mô hình ưu một chiều (latency, scale, schema linh hoạt) đổi lại giảm chiều khác (transaction chéo bản ghi, query phức tạp). So sánh không phải "cái này thay cái kia" mà là "mô hình nào vừa workload nào". Trong thực tế, hệ thống lớn dùng cả hai: SQL cho core OLTP có ACID, NoSQL cho phụ trợ có throughput cao, dữ liệu semi-structured, hoặc quan hệ phi truyền thống.
+### Đọc nhanh trước khi đi sâu
 
-Giả định: so sánh ở mức lựa chọn kỹ thuật; không đi sâu benchmark từng engine, không bàn licensing.
+**Ý chính:** SQL dùng bảng và quan hệ rõ ràng; NoSQL có nhiều kiểu dữ liệu khác nhau và thường ưu tiên scale hoặc cách truy cập cụ thể.
 
-```mermaid
-flowchart LR
-    Req["Yêu cầu nghiệp vụ"]
-    Char["Đặc tính dữ liệu<br/>structured · semi · graph"]
-    Cons["Yêu cầu nhất quán<br/>ACID · eventual"]
-    Scale["Mô hình scale<br/>vertical · sharding · native"]
-    Sql["SQL<br/>RDBMS quan hệ"]
-    No["NoSQL<br/>KV · Doc · Wide-col · Graph"]
-    Req --> Char --> Sql
-    Char --> No
-    Req --> Cons --> Sql
-    Cons --> No
-    Req --> Scale --> Sql
-    Scale --> No
-```
+**Ví dụ interview:** Báo cáo nhiều JOIN hợp với SQL; session theo user_id với schema đơn giản có thể hợp với key-value store.
 
-*Sơ đồ vị trí: yêu cầu nghiệp vụ dẫn tới ba trụ quyết định: cấu trúc dữ liệu, nhất quán, mô hình scale. Mỗi trụ nghiêng về SQL hay NoSQL tuỳ trường hợp. Bài này đi từng trụ.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Ứng dụng gửi query qua driver hoặc connection pool.
+2. Database engine tìm dữ liệu, kiểm tra constraint và xử lý transaction.
+3. Engine dùng index, lock/MVCC và log tùy loại thao tác.
+4. Kết quả được trả về; thay đổi chỉ bền vững sau COMMIT.
 
-"SQL là CSDL quan hệ schema cố định, dùng SQL chuẩn, hỗ trợ ACID và JOIN phức tạp; scale chủ yếu bằng read replica và sharding thủ công. NoSQL là tập bốn họ chính: key-value (Redis, DynamoDB), document (MongoDB, Couchbase), wide-column (Cassandra, HBase), graph (Neo4j, Neptune) — mỗi họ ưu một chiều: độ trễ thấp, schema linh hoạt, scale ngang dễ, hoặc truy vấn quan hệ phức tạp. Chọn SQL khi cần ACID chéo bản ghi và schema ổn định (thanh toán, kế toán); chọn NoSQL khi workload ưu đọc/ghi đơn giản với throughput cực cao (cache, analytics, recommendation), hoặc dữ liệu phi cấu trúc. Quan điểm: không có cái nào thay cái nào, dùng theo workload."
+**Nói như trong interview:** SQL dùng bảng và quan hệ rõ ràng; NoSQL có nhiều kiểu dữ liệu khác nhau và thường ưu tiên scale hoặc cách truy cập cụ thể. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Bốn họ NoSQL và ví dụ thật**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

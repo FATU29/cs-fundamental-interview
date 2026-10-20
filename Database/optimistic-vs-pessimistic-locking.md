@@ -4,34 +4,36 @@
 
 Chủ đề: Database · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nơi ứng dụng lưu dữ liệu và đọc lại dữ liệu. Khó ở chỗ dữ liệu phải đúng khi nhiều người cùng đọc, ghi, hoặc khi máy bị lỗi.
+
+**Nói đơn giản:** Pessimistic locking chặn trước khi sửa; optimistic locking cho phép sửa rồi kiểm tra version để phát hiện xung đột.
+
+**Từ khóa cần biết:** row = một dòng dữ liệu; query = câu hỏi gửi database; transaction = một nhóm thay đổi được xử lý cùng nhau.
+
+**Ví dụ dễ hình dung:** Hai nhân viên sửa cùng một hồ sơ; optimistic locking phát hiện version đổi và yêu cầu người đến sau tải lại.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Pessimistic locking: trước khi sửa một hàng, transaction xin khóa exclusive (SELECT ... FOR UPDATE) và giữ tới khi COMMIT. Mọi transaction khác muốn sửa cùng hàng phải chờ hoặc bị abort. Phù hợp khi xung đột dự đoán thường xuyên (counter, balance, inventory).
+### Đọc nhanh trước khi đi sâu
 
-Optimistic locking: không khóa trước; đọc hàng cùng version (hay timestamp/row hash), sửa trong bộ nhớ, khi COMMIT gửi `UPDATE ... WHERE id = ? AND version = ?`. Chỉ một transaction thắng cuộc (version khớp), các transaction khác commit thất bại với version mismatch và phải thử lại. Phù hợp khi xung đột hiếm (hồ sơ người dùng ít ai sửa cùng lúc).
+**Ý chính:** Pessimistic locking chặn trước khi sửa; optimistic locking cho phép sửa rồi kiểm tra version để phát hiện xung đột.
 
-Hai chiến lược trả lời câu hỏi khác nhau: pessimistic hỏi "ai sẽ đụng row này trước?" và khóa luôn; optimistic hỏi "khả năng hai người đụng cùng lúc có cao không?" và phòng thân khi COMMIT.
+**Ví dụ interview:** Hai nhân viên sửa cùng một hồ sơ; optimistic locking phát hiện version đổi và yêu cầu người đến sau tải lại.
 
-```mermaid
-flowchart LR
-    App["Application"]
-    Read["Đọc row<br/>(+ version)"]
-    Opt["Optimistic:<br/>UPDATE WHERE version = ?"]
-    Pess["Pessimistic:<br/>SELECT FOR UPDATE<br/>(giữ tới COMMIT)"]
-    Commit["COMMIT"]
-    Retry["Retry<br/>(optimistic fail<br/>hoặc deadlock)"]
-    App --> Read --> Opt --> Commit
-    Read -.xung đột hiếm.-> Opt
-    App --> Pess --> Commit
-    Read -.xung đột cao.-> Pess
-    Commit -.thất bại.-> Retry
-```
+**Luồng 4 bước:**
 
-*Sơ đồ vị trí: Pessimistic xin khóa ngay khi đọc, optimistic dùng version check ở COMMIT. Cả hai đều có thể dẫn tới retry khi thất bại.*
+1. Ứng dụng gửi query qua driver hoặc connection pool.
+2. Database engine tìm dữ liệu, kiểm tra constraint và xử lý transaction.
+3. Engine dùng index, lock/MVCC và log tùy loại thao tác.
+4. Kết quả được trả về; thay đổi chỉ bền vững sau COMMIT.
 
-### Trả lời 30 giây
-
-"Pessimistic locking xin khóa exclusive (SELECT FOR UPDATE) ngay khi cần sửa; giao dịch khác phải chờ. Optimistic không khóa trước: đọc hàng kèm version (hoặc timestamp), sửa, rồi UPDATE WHERE id = ? AND version = ?; xung đột phát hiện ở COMMIT và phải retry. Pessimistic phù hợp hot row có contention cao; optimistic phù hợp khi xung đột hiếm và muốn tránh deadlock. Lưu ý: MVCC (InnoDB REPEATABLE READ) không loại bỏ lost update — hai SELECT không khóa có thể đọc cùng version, hai UPDATE sau đó ghi đè nhau. Cần cơ chế rõ ràng: hoặc dùng SELECT FOR UPDATE, hoặc version column + retry."
+**Nói như trong interview:** Pessimistic locking chặn trước khi sửa; optimistic locking cho phép sửa rồi kiểm tra version để phát hiện xung đột. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Pessimistic: SELECT FOR UPDATE và khóa được giữ tới COMMIT**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

@@ -4,37 +4,36 @@
 
 Chủ đề: Operating Systems · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Lớp phần mềm quản lý CPU, bộ nhớ, tiến trình và thiết bị. Ứng dụng gọi OS thay vì tự điều khiển phần cứng trực tiếp.
+
+**Nói đơn giản:** Bài toán dining philosophers mô phỏng nhiều task cùng cần tài nguyên, cho thấy deadlock và starvation có thể xuất hiện thế nào.
+
+**Từ khóa cần biết:** process = chương trình đang chạy; thread = luồng thực thi; kernel = phần lõi có quyền điều khiển máy.
+
+**Ví dụ dễ hình dung:** Năm worker cần hai resource; nếu mỗi worker giữ một resource rồi chờ resource kia, cả nhóm có thể deadlock.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Bài toán Dining Philosophers (Dijkstra, 1965) mô tả N triết gia ngồi quanh bàn tròn, giữa mỗi cặp triết gia có một chiếc đũa. Triết gia luân phiên giữa hai trạng thái: suy nghĩ và ăn. Để ăn, triết gia phải lấy được cả hai chiếc đũa ở hai bên; khi ăn xong, trả đũa về chỗ. Vấn đề: nếu mỗi triết gia cùng lúc cầm chiếc đũa bên trái và chờ đũa bên phải, toàn bộ hệ thống treo — đó là deadlock.
-    10|
-Bài toán này là bài minh họa kinh điển cho mutual exclusion, deadlock và starvation trong hệ điều hành. Nó là "Hello World" của concurrency: đơn giản để phát biểu, nhưng giải quyết triệt để đòi hỏi cân nhắc kỹ giữa correctness, liveness, throughput.
+### Đọc nhanh trước khi đi sâu
 
-```mermaid
-flowchart TD
-    P0["Philosopher 0<br/>(think/eat)"]
-    P1["Philosopher 1<br/>(think/eat)"]
-    P2["Philosopher 2<br/>(think/eat)"]
-    Pn["... Philosopher N-1 ..."]
-    C0["Chopstick 0"]
-    C1["Chopstick 1"]
-    C2["Chopstick 2"]
-    Cn["Chopstick N-1"]
-    P0 -.left.-> C0
-    P0 -.right.-> C1
-    P1 -.left.-> C1
-    P1 -.right.-> C2
-    P2 -.left.-> C2
-    P2 -.right.-> C0
-    Pn -.right.-> Cn
-    Pn -.left.-> C0
-```
+**Ý chính:** Bài toán dining philosophers mô phỏng nhiều task cùng cần tài nguyên, cho thấy deadlock và starvation có thể xuất hiện thế nào.
 
-*Sơ đồ vị trí: N triết gia ngồi vòng tròn, mỗi triết gia chia sẻ đũa với hai hàng xóm. Mỗi cạnh trái/phải là một chiếc đũa — tài nguyên dùng chung.*
+**Ví dụ interview:** Năm worker cần hai resource; nếu mỗi worker giữ một resource rồi chờ resource kia, cả nhóm có thể deadlock.
 
-### Trả lời 30 giây
+**Luồng 4 bước:**
 
-"Dining Philosophers là bài toán N triết gia ngồi quanh bàn tròn với N chiếc đũa; mỗi triết gia cần hai đũa (trái + phải) để ăn. Nếu mỗi người cùng cầm đũa trái và chờ đũa phải, toàn bộ deadlock. Bốn giải pháp kinh điển: (1) lock ordering — một triết gia lấy đũa theo thứ tự ngược (phải trước trái), phá circular wait; (2) tránh hold-and-wwait — semaphore atomic kiểm tra cả hai đũa trước khi giữ; (3) trylock với backoff ngẫu nhiên; (4) giải pháp Dijkstra với `state` (THINKING/HUNGRY/EATING) và semaphore toàn cục `mutex` bảo vệ critical section. Mỗi giải pháp đánh đổi giữa độ phức tạp, throughput, và đảm bảo không có starvation."
+1. Mỗi worker cần hai resource để làm việc.
+2. Mỗi worker lấy resource thứ nhất rồi chờ resource thứ hai.
+3. Nếu tất cả cùng làm vậy, tạo vòng chờ và deadlock.
+4. Đổi thứ tự lấy resource, giới hạn worker hoặc dùng trylock để phá vòng.
+
+**Nói như trong interview:** Bài toán dining philosophers mô phỏng nhiều task cùng cần tài nguyên, cho thấy deadlock và starvation có thể xuất hiện thế nào. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Phát biểu chính thức**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

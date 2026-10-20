@@ -4,27 +4,36 @@
 
 Chủ đề: OOP - Design Patterns · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách tổ chức code thành những đối tượng dễ thay đổi. Mục tiêu là giữ luật của nghiệp vụ rõ ràng và tránh code phụ thuộc chặt vào nhau.
+
+**Nói đơn giản:** Polymorphism cho phép cùng một lời gọi method nhưng object thật có thể chọn cách thực hiện khác nhau.
+
+**Từ khóa cần biết:** class = khuôn; object = instance cụ thể; method = hành vi mà object cung cấp.
+
+**Ví dụ dễ hình dung:** Danh sách PaymentMethod có thể chứa CardPayment và BankTransfer; cùng gọi pay() nhưng mỗi object xử lý khác.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Polymorphism cho phép cùng một thao tác gọi có hành vi khác nhau tuỳ ngữ cảnh: cùng tên method, cùng signature, nhưng thực thi khác tuỳ kiểu thực tế hoặc kiểu argument. Hai dạng chính:
+### Đọc nhanh trước khi đi sâu
 
-- **Compile-time (static)**: ad-hoc (overload) - compiler chọn method theo kiểu argument; parametric (generics/template) - một thân method dùng cho nhiều kiểu nhưng phân giải tại compile.
-- **Runtime (dynamic, subtype)**: gọi method qua reference kiểu cha nhưng runtime chọn method của subtype thực tế qua vtable (C++), itable/method table (JVM), hoặc MethodTable (C#).
+**Ý chính:** Polymorphism cho phép cùng một lời gọi method nhưng object thật có thể chọn cách thực hiện khác nhau.
 
-```mermaid
-flowchart LR
-    Ref["Reference<br/>kiểu cha"]
-    SubA["Subtype A"]
-    SubB["Subtype B"]
-    Ref -->|"dynamic dispatch"| SubA
-    Ref -->|"dynamic dispatch"| SubB
-```
+**Ví dụ interview:** Danh sách PaymentMethod có thể chứa CardPayment và BankTransfer; cùng gọi pay() nhưng mỗi object xử lý khác.
 
-*Sơ đồ vị trí: code giữ reference kiểu cha; runtime instance là một trong nhiều subtype; cuộc gọi method được resolve tại call site.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Client gọi một contract dễ hiểu.
+2. Object hoặc pattern chọn code thực hiện phía sau contract.
+3. State và dependency được giữ ở nơi có trách nhiệm rõ ràng.
+4. Khi requirement đổi, thay implementation mà giảm ảnh hưởng tới client.
 
-"Polymorphism có hai dạng. Compile-time (overload, generics) compiler phân giải tại compile; bytecode đã cố định cuộc gọi, không có indirection. Runtime (subtype) instance method được xử lý qua vtable/itables; C++ dùng vptr + vtable (mỗi class một vtable), JVM dùng method table cho method class + itable cho interface, C# cần `virtual` + `override`, còn `new` chỉ là hide không virtual. C++ method non-static mặc định non-virtual (cần `virtual`); Java instance method mặc định virtual trừ `final`/`private`/`static`. Field không virtual, chỉ hide theo tên. Từ khoá `final`/`sealed` cho compiler devirtualize tại compile, giảm overhead indirection."
+**Nói như trong interview:** Polymorphism cho phép cùng một lời gọi method nhưng object thật có thể chọn cách thực hiện khác nhau. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Compile-time: overload resolution**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

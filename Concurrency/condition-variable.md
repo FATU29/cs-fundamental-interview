@@ -4,31 +4,36 @@
 
 Chủ đề: Concurrency · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nhiều việc cùng chạy trong một chương trình. Khó ở chỗ các việc có thể chạm cùng dữ liệu và làm kết quả sai nếu không phối hợp.
+
+**Nói đơn giản:** Condition variable cho phép một luồng ngủ cho tới khi điều kiện đúng, thay vì liên tục kiểm tra và đốt CPU.
+
+**Từ khóa cần biết:** thread = luồng chạy; shared state = dữ liệu dùng chung; synchronization = cách phối hợp luồng.
+
+**Ví dụ dễ hình dung:** Worker ngủ khi hàng đợi rỗng và được đánh thức khi producer thêm việc, thay vì kiểm tra hàng đợi liên tục.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Condition variable (CV) là biến điều kiện đi kèm một mutex, cho phép thread tạm nhường mutex và "ngủ" cho đến khi một thread khác báo điều kiện đã đổi. CV không tự bảo vệ tài nguyên; nó chỉ là hàng đợi "thread đang chờ predicate". Mỗi lần wake phải kết hợp kiểm tra predicate dưới mutex, không dùng làm hộp thư tín hiệu thuần.
+### Đọc nhanh trước khi đi sâu
 
-CV xuất hiện trong POSIX (`pthread_cond_t`), C++11 (`std::condition_variable`), Java (`Object.wait/notify`, `java.util.concurrent.locks.Condition`), Python (`threading.Condition`), Go (`sync.Cond`), Rust (`std::sync::Condvar`). Mỗi ngôn ngữ có API khác nhau nhưng quy tắc dùng đúng (predicate + while + lock) gần như giống nhau.
+**Ý chính:** Condition variable cho phép một luồng ngủ cho tới khi điều kiện đúng, thay vì liên tục kiểm tra và đốt CPU.
 
-```mermaid
-flowchart TD
-    Producer["Producer thread<br/>đổi trạng thái + notify"]
-    Mutex["Mutex<br/>bảo vệ state"]
-    CV["Condition variable<br/>hàng đợi thread chờ"]
-    Consumer1["Consumer 1<br/>đợi predicate"]
-    Consumer2["Consumer 2<br/>đợi predicate"]
-    Producer -->|"signal state thay đổi"| Mutex
-    Producer -->|"cv.notify_one"| CV
-    Consumer1 -->|"cv.wait(mutex)"| CV
-    Consumer2 -->|"cv.wait(mutex)"| CV
-    CV --> Mutex
-```
+**Ví dụ interview:** Worker ngủ khi hàng đợi rỗng và được đánh thức khi producer thêm việc, thay vì kiểm tra hàng đợi liên tục.
 
-*Sơ đồ vị trí: producer giữ mutex cập nhật state rồi gọi `notify`; consumer `wait` trên CV sẽ bị block cho tới khi notify được phát. Mutex phải dùng chung giữa producer và consumer để bảo vệ biến điều kiện.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Có nhiều task cùng chạy.
+2. Các task chạm vào dữ liệu hoặc tài nguyên chung.
+3. Chương trình dùng message passing, atomic hoặc lock để phối hợp.
+4. Task tiếp tục và kết quả không bị mất, trùng hoặc kẹt.
 
-"Condition variable cho phép thread đợi một điều kiện logic, ví dụ 'queue không rỗng', mà không busy-wait. Nó chỉ hoạt động đúng khi đi kèp một mutex và một predicate: thread chờ dùng `while (!predicate) { cv.wait(mutex); }`, thread thay đổi trạng thái giữ mutex xong gọi `notify_one` hoặc `notify_all`. Nguyên tắc sống còn là phải kiểm tra predicate trong vòng lặp `while`, không phải `if`, vì có thể bị spurious wakeup hoặc bị đánh thức nhưng predicate vẫn sai do thread khác chen ngang. Dùng sai CV là nguyên nhân hàng đầu gây mất wakeup và deadlock trong producer-consumer."
+**Nói như trong interview:** Condition variable cho phép một luồng ngủ cho tới khi điều kiện đúng, thay vì liên tục kiểm tra và đốt CPU. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. CV không tự bảo vệ dữ liệu — chỉ là hàng đợi**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

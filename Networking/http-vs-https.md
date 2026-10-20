@@ -4,41 +4,38 @@
 
 Chủ đề: Networking · Ngày: 2026-10-15
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách trình duyệt, ứng dụng và máy chủ gửi dữ liệu cho nhau. Mỗi bước có giao thức, độ trễ và kiểu lỗi riêng.
+
+**Nói đơn giản:** HTTPS là HTTP chạy trong TLS, giúp xác thực server và mã hóa dữ liệu trên đường truyền.
+
+**Từ khóa cần biết:** client = bên gửi request; server = bên phục vụ; packet = mảnh dữ liệu đi qua mạng.
+
+**Ví dụ dễ hình dung:** HTTPS ngăn người trên Wi-Fi đọc token và giúp browser biết certificate thuộc đúng tên miền.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-**Định nghĩa.** HTTP (RFC 9110) là giao thức tầng ứng dụng, text-based, trao đổi qua TCP cổng 80. Mọi byte trên dây — URL path, header, cookie, body — đều plaintext.
-
-HTTPS (HTTP Secure) là HTTP chạy bên trong TLS (RFC 8446). Về ứng dụng, cấu trúc request/response không đổi; về truyền tải, mọi byte sau bắt tay đều được mã hóa bằng AEAD và xác thực toàn vẹn, kèm chứng chỉ X.509 để client xác minh server. Cổng mặc định: 443.
-
-Hai thứ HTTPS thêm vào HTTP: (1) bí mật và toàn vẹn dòng byte nhờ AEAD (AES-GCM, ChaCha20-Poly1305); (2) xác thực server qua chuỗi chứng chỉ X.509 do CA ký.
-
-HTTPS không thay đổi ngữ nghĩa HTTP (status code, header, cookie, cache). HTTPS không tự xác thực người dùng. HTTPS không ẩn: IP nguồn/đích, cổng, tên miền trong SNI (trừ ECH), kích thước, timing, ALPN.
-
-Giả định: bài này nói HTTPS qua TLS 1.2 và 1.3 trên TCP. SSL 2.0/3.0 và TLS 1.0/1.1 đã deprecated.
-
-```mermaid
-flowchart TB
-    A["HTTP request/response<br/>GET /orders, headers, cookies"]
-    B["TLS record layer<br/>AEAD: AES-GCM hoac ChaCha20-Poly1305"]
-    C["TCP<br/>cổng 443 (HTTPS) hoac 80 (HTTP)"]
-    D["IP<br/>src/dst IP, length, timing"]
-    A --> B
-    B --> C
-    C --> D
-    style A fill:#e1f5fe
-    style B fill:#fff3e0
-    style C fill:#f3e5f5
-    style D fill:#eceff1
-    linkStyle 0 stroke:#1976d2
-    linkStyle 1 stroke:#f57c00
-    linkStyle 2 stroke:#7b1fa2
-```
-
-*Sơ đồ vị trí: HTTP nằm trên TLS, TLS nằm trên TCP, TCP nằm trên IP. HTTPS thêm lớp TLS giữa HTTP và TCP.*
-
-**Trả lời 30 giây.** HTTP truyền mọi thứ dạng plaintext trên cổng 80. HTTPS là HTTP bọc trong TLS trên cổng 443. TLS cung cấp mã hóa AEAD (AES-GCM, ChaCha20-Poly1305) để bảo vệ bí mật và toàn vẹn, cộng thêm chuỗi chứng chỉ X.509 do CA ký để xác thực server. TLS 1.3 bắt tay 1 RTT, mặc định forward secrecy qua ECDHE. HTTPS không ẩn IP, SNI, kích thước hay timing.
 
 ## 2. Cơ chế cốt lõi
+### Đọc nhanh trước khi đi sâu
+
+**Ý chính:** HTTPS là HTTP chạy trong TLS, giúp xác thực server và mã hóa dữ liệu trên đường truyền.
+
+**Ví dụ interview:** HTTPS ngăn người trên Wi-Fi đọc token và giúp browser biết certificate thuộc đúng tên miền.
+
+**Luồng 4 bước:**
+
+1. Ứng dụng tạo request với tên host, port và dữ liệu.
+2. OS và các giao thức mạng tìm đường rồi chuyển packet tới server.
+3. Server xử lý request và trả response qua kết nối phù hợp.
+4. Client kiểm tra response, cache hoặc render dữ liệu cho người dùng.
+
+**Nói như trong interview:** HTTPS là HTTP chạy trong TLS, giúp xác thực server và mã hóa dữ liệu trên đường truyền. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Đọc nhanh trước khi đi sâu**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ### Bước 1. TCP three-way handshake (1 RTT)
 

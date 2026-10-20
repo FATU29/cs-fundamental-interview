@@ -4,35 +4,36 @@
 
 Chủ đề: Distributed Systems · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nhiều máy cùng phục vụ một hệ thống. Khó ở chỗ mạng có thể chậm hoặc đứt, máy có thể hỏng, nhưng người dùng vẫn cần kết quả hợp lý.
+
+**Nói đơn giản:** Một thao tác idempotent có thể được gửi lại mà không tạo thêm side effect, rất quan trọng khi client retry vì timeout.
+
+**Từ khóa cần biết:** node = một máy hoặc tiến trình; network failure = mạng chậm/đứt; consistency = các nơi nhìn dữ liệu giống nhau tới mức nào.
+
+**Ví dụ dễ hình dung:** Client timeout sau khi charge thẻ và gửi lại request; idempotency key giúp server không charge lần hai.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Idempotency là tính chất của một operation mà khi thực hiện nhiều lần với cùng tham số, kết quả cuối cùng giống như chỉ thực hiện một lần. Trong API: HTTP method `GET`, `PUT`, `DELETE` chuẩn idempotent — gọi 2 lần hay 10 lần, server state cuối cùng như nhau (resource bị xoá thì xoá, hoặc update với cùng body thì giá trị cuối giống nhau). `POST` không idempotent — gọi 2 lần thường tạo 2 resource.
+### Đọc nhanh trước khi đi sâu
 
-Để làm `POST` cũng idempotent, client gửi kèm **idempotency key** (UUID, request ID) trong header. Server lưu key + response lần đầu. Request sau với cùng key, server trả lại response đã lưu thay vì xử lý lại. Quan trọng cho: payment (không double-charge), order (không tạo 2 order), message queue (consumer nhận event trùng vẫn đúng), saga (compensation không chạy 2 lần).
+**Ý chính:** Một thao tác idempotent có thể được gửi lại mà không tạo thêm side effect, rất quan trọng khi client retry vì timeout.
 
-```mermaid
-flowchart LR
-    subgraph " "
-    direction LR
-    C["Client"]
-    S["Server"]
-    K[("Idempotency store<br/>(Redis / DB)")]
-    C -->|POST /charge<br/>Idempotency-Key: ABC123| S
-    S --> K
-    K -.lưu key + response.-> S
-    S -->|201 OK response_1| C
-    end
-    C -.retry với<br/>cùng ABC123.-> S
-    S --> K
-    K -.đã có, trả lại.-> S
-    S -.trả response_1.-> C
-```
+**Ví dụ interview:** Client timeout sau khi charge thẻ và gửi lại request; idempotency key giúp server không charge lần hai.
 
-*Sơ đồ vị trí: client gửi POST kèm key, server xử lý lần đầu và lưu. Request retry với cùng key, server trả lại response cũ (không xử lý lại). Store là Redis hoặc DB có TTL.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Client gửi request tới một node hoặc gateway.
+2. Node gọi các node khác qua mạng và có thể gặp timeout hoặc retry.
+3. Hệ thống chọn cách giữ trạng thái đồng bộ và xử lý lỗi.
+4. Client nhận kết quả hoặc lỗi có thể retry an toàn.
 
-"Idempotency nghĩa là thực hiện operation nhiều lần với cùng input, kết quả cuối giống như chỉ làm một lần. HTTP GET/PUT/DELETE chuẩn idempotent vì định nghĩa; POST không idempotent. Để POST an toàn retry, client gửi kèm `Idempotency-Key` header (UUID). Server lưu key + response lần đầu vào store (Redis hoặc DB có TTL 24h), request sau cùng key trả lại response cũ thay vì xử lý lại. Quan trọng cho payment (Stripe, PayPal đều có), order tạo, message consumer. Lưu ý: idempotency key phải unique per business operation, không phải per request. Nếu client retry với cùng key nhưng body khác, server nên trả lỗi (conflict) chứ không xử lý body mới. Idempotency khác với dedup — idempotency đảm bảo effect một lần; dedup chỉ phát hiện trùng."
+**Nói như trong interview:** Một thao tác idempotent có thể được gửi lại mà không tạo thêm side effect, rất quan trọng khi client retry vì timeout. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Idempotency ở tầng HTTP method**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

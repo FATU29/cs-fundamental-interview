@@ -4,31 +4,36 @@
 
 Chủ đề: Database · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nơi ứng dụng lưu dữ liệu và đọc lại dữ liệu. Khó ở chỗ dữ liệu phải đúng khi nhiều người cùng đọc, ghi, hoặc khi máy bị lỗi.
+
+**Nói đơn giản:** Clustered index sắp dữ liệu thật theo khóa; non-clustered index giữ một danh sách khóa rồi trỏ tới dòng. Khác biệt này ảnh hưởng tốc độ đọc và ghi.
+
+**Từ khóa cần biết:** row = một dòng dữ liệu; query = câu hỏi gửi database; transaction = một nhóm thay đổi được xử lý cùng nhau.
+
+**Ví dụ dễ hình dung:** Đọc các đơn hàng liên tiếp theo user_id nhanh hơn khi dòng dữ liệu nằm gần nhau theo đúng khóa clustered.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Clustered index là cấu trúc mà thứ tự vật lý của row trong bảng trùng với thứ tự của key. Mỗi bảng chỉ có tối đa một clustered index vì row không thể sắp xếp theo hai key cùng lúc. Non-clustered index (gọi là secondary index trong MySQL/PostgreSQL) là cấu trúc riêng, key được sort và trỏ tới row thật nằm ở heap hoặc ở clustered index.
+### Đọc nhanh trước khi đi sâu
 
-Ba cách triển khai chính: MySQL InnoDB mặc định clustered theo primary key, row nằm trong leaf của B+ tree PK. PostgreSQL mặc định heap, mọi index (kể cả PK) đều trỏ tới row trong heap. SQL Server cho phép chọn clustered hoặc non-clustered, không chọn thì mặc định tạo non-clustered. Oracle có IOT (Index-Organized Table) là clustered, hoặc heap table thường.
+**Ý chính:** Clustered index sắp dữ liệu thật theo khóa; non-clustered index giữ một danh sách khóa rồi trỏ tới dòng. Khác biệt này ảnh hưởng tốc độ đọc và ghi.
 
-Sự khác biệt cốt lõi là số lần I/O khi đọc row: clustered PK lookup mất `h` page read, secondary index lookup mất `h` page read cộng thêm 1 random I/O để vào heap/clustered PK. Range query trên clustered PK đọc tuần tự; range query trên secondary index nhảy qua lại giữa các page không liên quan trong heap.
+**Ví dụ interview:** Đọc các đơn hàng liên tiếp theo user_id nhanh hơn khi dòng dữ liệu nằm gần nhau theo đúng khóa clustered.
 
-```mermaid
-flowchart LR
-    App["Application"]
-    Sec["Secondary index<br/>(user_id)"]
-    Clu["Clustered index / PK<br/>(id, sorted)"]
-    Heap["Heap<br/>(row theo insertion order)"]
-    App --> Sec --> Clu
-    App --> Clu
-    Sec --> Heap
-    Clu --> Heap
-```
+**Luồng 4 bước:**
 
-*Sơ đồ vị trí: secondary index trỏ tới PK (InnoDB) hoặc row id (PostgreSQL heap). Clustered PK là bản thân bảng (InnoDB). Heap chỉ tồn tại khi bảng không clustered (PostgreSQL).*
+1. Ứng dụng gửi query qua driver hoặc connection pool.
+2. Database engine tìm dữ liệu, kiểm tra constraint và xử lý transaction.
+3. Engine dùng index, lock/MVCC và log tùy loại thao tác.
+4. Kết quả được trả về; thay đổi chỉ bền vững sau COMMIT.
 
-### Trả lời 30 giây
-
-"Clustered index lưu row theo thứ tự key trong B+ tree, mỗi bảng chỉ có một (thường là PK). Non-clustered index là cấu trúc riêng trỏ tới row. InnoDB clustered theo PK, secondary index trỏ qua PK rồi mới đọc row. PostgreSQL mặc định heap, mọi index trỏ tới row trong heap. Range query trên clustered PK đọc tuần tự; secondary range query tốn random I/O."
+**Nói như trong interview:** Clustered index sắp dữ liệu thật theo khóa; non-clustered index giữ một danh sách khóa rồi trỏ tới dòng. Khác biệt này ảnh hưởng tốc độ đọc và ghi. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. MySQL InnoDB: bảng chính là clustered PK**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

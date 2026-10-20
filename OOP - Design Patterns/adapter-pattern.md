@@ -4,26 +4,36 @@
 
 Chủ đề: OOP - Design Patterns · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách tổ chức code thành những đối tượng dễ thay đổi. Mục tiêu là giữ luật của nghiệp vụ rõ ràng và tránh code phụ thuộc chặt vào nhau.
+
+**Nói đơn giản:** Adapter bọc một interface cũ để nó nói chuyện được với code đang mong đợi interface mới.
+
+**Từ khóa cần biết:** class = khuôn; object = instance cụ thể; method = hành vi mà object cung cấp.
+
+**Ví dụ dễ hình dung:** Code mới cần PaymentGateway nhưng SDK cũ có LegacyBankClient; adapter đổi tên và định dạng method giữa hai bên.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Adapter pattern thuộc nhóm structural trong GoF, biến đổi interface của một lớp thành interface khác mà client mong đợi. Adapter bọc (wrap) object gốc (adaptee) và chuyển đổi lời gọi từ client sang adaptee. Pattern này cho phép tích hợp lớp cũ, thư viện bên thứ ba, hoặc hệ thống legacy vào hệ thống mới mà không sửa code đã có.
+### Đọc nhanh trước khi đi sâu
 
-Có hai dạng: object adapter (bọc bằng composition - giữ reference tới adaptee) và class adapter (kế thừa nhiều lớp - chỉ có trong ngôn ngữ đa kế thừa như C++). Object adapter phổ biến hơn vì linh hoạt và áp dụng được trong Java, C#, TypeScript.
+**Ý chính:** Adapter bọc một interface cũ để nó nói chuyện được với code đang mong đợi interface mới.
 
-```mermaid
-flowchart LR
-    C["Client<br/>(mong đợi Target interface)"]
-    A["Adapter<br/>(implement Target)"]
-    AD["Adaptee<br/>(interface không tương thích)"]
-    C --> A
-    A --> AD
-```
+**Ví dụ interview:** Code mới cần PaymentGateway nhưng SDK cũ có LegacyBankClient; adapter đổi tên và định dạng method giữa hai bên.
 
-*Sơ đồ vị trí: Client chỉ biết Target interface. Adapter implement Target và giữ reference Adaptee. Client gọi Adapter, Adapter dịch sang Adaptee.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Client gọi một contract dễ hiểu.
+2. Object hoặc pattern chọn code thực hiện phía sau contract.
+3. State và dependency được giữ ở nơi có trách nhiệm rõ ràng.
+4. Khi requirement đổi, thay implementation mà giảm ảnh hưởng tới client.
 
-"Adapter pattern giải quyết vấn đề hai interface không khớp nhau. Client mong đợi Target (interface A), nhưng class có sẵn là Adaptee (interface B). Adapter implement Target, giữ reference Adaptee bên trong, và trong mỗi method của Target gọi method tương ứng của Adaptee với chuyển đổi tham số/kết quả. Ví dụ thực tế: bọc thư viện XML cũ thành JSON API cho microservice mới; bọc driver JDBC database cũ; tích hợp payment gateway bên thứ ba. Trong Java có `java.util.Arrays#asList` (array → List); trong JS/TS dùng rất nhiều cho Promise <-> callback API. Adapter không thêm logic nghiệp vụ, chỉ dịch interface - nếu cần logic phức tạp thì đó là decorator hoặc strategy."
+**Nói như trong interview:** Adapter bọc một interface cũ để nó nói chuyện được với code đang mong đợi interface mới. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Bốn thành phần chuẩn**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

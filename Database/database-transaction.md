@@ -4,27 +4,36 @@
 
 Chủ đề: Database · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nơi ứng dụng lưu dữ liệu và đọc lại dữ liệu. Khó ở chỗ dữ liệu phải đúng khi nhiều người cùng đọc, ghi, hoặc khi máy bị lỗi.
+
+**Nói đơn giản:** Transaction gom nhiều câu lệnh thành một công việc: hoặc mọi thay đổi được ghi, hoặc không thay đổi nào được giữ lại.
+
+**Từ khóa cần biết:** row = một dòng dữ liệu; query = câu hỏi gửi database; transaction = một nhóm thay đổi được xử lý cùng nhau.
+
+**Ví dụ dễ hình dung:** Tạo order, trừ tồn kho và ghi payment log cần commit cùng nhau hoặc rollback cùng nhau.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Database transaction là một đơn vị công việc gồm một hoặc nhiều câu SQL được engine xử lý như một khối duy nhất: hoặc tất cả câu được áp dụng vĩnh viễn (COMMIT), hoặc engine huỷ bỏ toàn bộ ảnh hưởng của chúng như thể chưa từng chạy (ROLLBACK). Trong RDBMS, ranh giới transaction được đánh dấu bằng `BEGIN` (hoặc `START TRANSACTION`) và kết thúc bằng `COMMIT` / `ROLLBACK`. Ngoài RDBMS, transaction còn xuất hiện trong một số NoSQL (MongoDB replica set, document store có multi-doc ACID) nhưng phổ biến nhất vẫn là SQL.
+### Đọc nhanh trước khi đi sâu
 
-Transaction cần thiết vì nhiều nghiệp vụ chạm nhiều dòng/bảng (chuyển tiền: trừ tài khoản A, cộng tài khoản B) và phải "tất cả hoặc không" để không để dữ liệu ở trạng thái nửa vời. Engine dùng write-ahead log (WAL) và lock manager để đảm bảo điều đó; chi tiết ở [write-ahead-log](write-ahead-log.md) và [acid-properties](acid-properties.md).
+**Ý chính:** Transaction gom nhiều câu lệnh thành một công việc: hoặc mọi thay đổi được ghi, hoặc không thay đổi nào được giữ lại.
 
-```mermaid
-flowchart LR
-    App["Application<br/>(order service,<br/>payment worker)"]
-    Driver["DB driver / pool<br/>(begin, commit,<br/>rollback)"]
-    Txn["Transaction<br/>(BEGIN ... COMMIT<br/>/ ROLLBACK)"]
-    Engine["Storage engine<br/>(WAL, lock manager,<br/>MVCC)"]
-    Disk["Disk / SSD<br/>(data files, redo log)"]
-    App --> Driver --> Txn --> Engine --> Disk
-```
+**Ví dụ interview:** Tạo order, trừ tồn kho và ghi payment log cần commit cùng nhau hoặc rollback cùng nhau.
 
-*Sơ đồ vị trí: Application gửi câu SQL qua driver; driver mở transaction; engine áp dụng thay đổi vào buffer, ghi WAL ra disk; COMMIT mới flush data file.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Ứng dụng gửi query qua driver hoặc connection pool.
+2. Database engine tìm dữ liệu, kiểm tra constraint và xử lý transaction.
+3. Engine dùng index, lock/MVCC và log tùy loại thao tác.
+4. Kết quả được trả về; thay đổi chỉ bền vững sau COMMIT.
 
-"Transaction là đơn vị công việc ACID bao gồm một hoặc nhiều câu SQL, được engine xử lý nguyên tử: hoặc tất cả COMMIT, hoặc ROLLBACK không để lại dấu vết. Trong PostgreSQL và InnoDB (MySQL), transaction mặc định bắt đầu bằng `BEGIN` và kết thúc bằng `COMMIT` / `ROLLBACK`, trừ khi bật auto-commit (PostgreSQL có thể bật `SET autocommit = on`). Engine dùng write-ahead log để khôi phục sau crash và lock + MVCC để cô lập giữa các transaction chạy song song. Một transaction chỉ nên giữ trong vài trăm ms tới vài giây; giữ quá lâu sẽ phình WAL, lock contention và block vacuum."
+**Nói như trong interview:** Transaction gom nhiều câu lệnh thành một công việc: hoặc mọi thay đổi được ghi, hoặc không thay đổi nào được giữ lại. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. BEGIN: mở transaction, gắn session**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

@@ -4,29 +4,36 @@
 
 Chủ đề: Memory - Runtime · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách chương trình dùng và thu hồi bộ nhớ khi đang chạy. Hiểu phần này giúp giải thích chậm, treo, crash và out-of-memory.
+
+**Nói đơn giản:** Trong Java, final là từ khóa, finalize là phương thức cũ, còn finally là khối dọn dẹp. Ba từ giống nhau nhưng có vai trò hoàn toàn khác.
+
+**Từ khóa cần biết:** object = dữ liệu đang sống; reference = đường trỏ tới object; runtime = phần thực thi chương trình.
+
+**Ví dụ dễ hình dung:** finally chạy để đóng file dù try có lỗi; final ngăn biến hoặc class thay đổi; finalize không phải cách cleanup đáng tin.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-- `final` là một modifier áp dụng cho biến, method hoặc class. Biến `final` chỉ gán được một lần (hằng), method `final` không thể override, class `final` không thể extend.
-- `finalize()` là một method legacy khai báo trong `java.lang.Object` với signature `protected void finalize() throws Throwable`. JVM gọi nó trước khi object được GC thu dọn. Java 9 đánh dấu `@Deprecated(forRemoval=true)`.
-- `finally` là một block đi kèm `try` (hoặc `try-with-resources`). Nội dung trong block luôn chạy sau `try` dù có exception hay không.
+### Đọc nhanh trước khi đi sâu
 
-Cả ba chỉ liên quan tới "cleanup theo nghĩa rộng" nhưng thuộc ba cơ chế khác nhau: biên dịch (final), runtime GC (finalize), exception path (finally). Trong phỏng vấn, nhầm lẫn chúng là lỗi phổ biến vì tên gần giống nhau.
+**Ý chính:** Trong Java, final là từ khóa, finalize là phương thức cũ, còn finally là khối dọn dẹp. Ba từ giống nhau nhưng có vai trò hoàn toàn khác.
 
-```mermaid
-flowchart LR
-    F["final<br/>(modifier)<br/>class/method/variable"] --> Compile["Compile time<br/>đặt ràng buộc immutable"]
-    FZ["finalize()<br/>(Object method)"] --> Runtime["Runtime<br/>hook trước khi GC"]
-    FY["finally<br/>(block)"] --> Except["Exception path<br/>luôn chạy sau try/try-with-resources"]
-    Compile --> Build["Kết quả: bytecode cấm ghi lại"]
-    Runtime --> GC["GC gọi trên best-effort, không đảm bảo"]
-    Except --> Cleanup["Cleanup resource đáng tin cậy"]
-```
+**Ví dụ interview:** finally chạy để đóng file dù try có lỗi; final ngăn biến hoặc class thay đổi; finalize không phải cách cleanup đáng tin.
 
-*Sơ đồ vị trí: `final` ảnh hưởng compile time; `finalize()` thuộc runtime GC; `finally` thuộc exception handling. Ba cơ chế độc lập, chỉ chung chữ "final".*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Code tạo object hoặc vùng nhớ.
+2. Runtime giữ object còn được dùng và cung cấp reference cho code.
+3. Object không còn reachable sẽ được free hoặc garbage collector thu hồi.
+4. Nếu giữ nhầm, vùng nhớ phình lên và chương trình chậm hoặc hết RAM.
 
-"`final` là modifier gắn lên biến, method hoặc class để cấm ghi lại (biến), cấm override (method), cấm kế thừa (class). `finalize()` là method legacy của `java.lang.Object`, JVM gọi trước khi object bị GC; nó không đáng tin (có thể không bao giờ chạy hoặc chạy trên thread khác), hiện đã deprecated. `finally` là block đi kèm `try` để cleanup tài nguyên — luôn chạy dù có hay không exception. Trong Java hiện đại: thay `finalize()` bằng `try-with-resources` (AutoCloseable) hoặc `Cleaner` (Java 9+) để cleanup an toàn. Nhầm ba thứ này là lỗi rất phổ biến trong phỏng vấn; bạn nên giải thích thuộc tính 'deterministic vs best-effort' rõ ràng."
+**Nói như trong interview:** Trong Java, final là từ khóa, finalize là phương thức cũ, còn finally là khối dọn dẹp. Ba từ giống nhau nhưng có vai trò hoàn toàn khác. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. `final` ở ba vị trí**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

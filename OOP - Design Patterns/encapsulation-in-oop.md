@@ -4,23 +4,36 @@
 
 Chủ đề: OOP - Design Patterns · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách tổ chức code thành những đối tượng dễ thay đổi. Mục tiêu là giữ luật của nghiệp vụ rõ ràng và tránh code phụ thuộc chặt vào nhau.
+
+**Nói đơn giản:** Encapsulation giữ state và hành vi trong một object, chỉ cho bên ngoài thay đổi qua các method bảo vệ luật dữ liệu.
+
+**Từ khóa cần biết:** class = khuôn; object = instance cụ thể; method = hành vi mà object cung cấp.
+
+**Ví dụ dễ hình dung:** Account không cho đặt balance âm trực tiếp; mọi thay đổi đi qua deposit hoặc withdraw có kiểm tra.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Encapsulation là một trong bốn trụ cột OOP, đi cùng abstraction, inheritance, polymorphism. Encapsulation gói data (field) và behavior (method) vào cùng một class, đồng thời giới hạn quyền truy cập trực tiếp vào state bên trong. Bên ngoài chỉ giao tiếp qua method công khai có kiểm tra, đảm bảo object luôn ở trạng thái hợp lệ (invariant).
+### Đọc nhanh trước khi đi sâu
 
-```mermaid
-flowchart LR
-    C["Client"]
-    O["Object<br/>(state ẩn)"]
-    C -- "public method<br/>(có validate)" --> O
-    O -- "private field<br/>(không truy cập trực tiếp)" --> O
-```
+**Ý chính:** Encapsulation giữ state và hành vi trong một object, chỉ cho bên ngoài thay đổi qua các method bảo vệ luật dữ liệu.
 
-*Sơ đồ vị trí: client chỉ gọi public method có validate. Field private nằm bên trong object, không thể `obj.field` từ ngoài.*
+**Ví dụ interview:** Account không cho đặt balance âm trực tiếp; mọi thay đổi đi qua deposit hoặc withdraw có kiểm tra.
 
-### Trả lời 30 giây
+**Luồng 4 bước:**
 
-"Encapsulation là gói state và behavior vào class, giấu chi tiết qua access modifier (private, protected, public), chỉ phơi method công khai có kiểm tra. Mục đích: bảo vệ invariant — ví dụ `age >= 0`, `balance >= 0`, `email` không null. Encapsulation khác abstraction: encapsulation quyết định giấu cái gì và bảo vệ state như thế nào, abstraction quyết định lộ cái gì ra ngoài qua contract. Ví dụ: `ArrayList` private `Object[] elementData` là encapsulation; `List` interface là abstraction. Một class vừa có encapsulation vừa có abstraction. Encapsulation còn là nền tảng của immutability (`final` field + class final + no setter) — Java `String`, `LocalDateTime`, `Optional` đều immutable."
+1. Client gọi một contract dễ hiểu.
+2. Object hoặc pattern chọn code thực hiện phía sau contract.
+3. State và dependency được giữ ở nơi có trách nhiệm rõ ràng.
+4. Khi requirement đổi, thay implementation mà giảm ảnh hưởng tới client.
+
+**Nói như trong interview:** Encapsulation giữ state và hành vi trong một object, chỉ cho bên ngoài thay đổi qua các method bảo vệ luật dữ liệu. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Access modifier trong Java**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

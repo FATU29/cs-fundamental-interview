@@ -4,26 +4,36 @@
 
 Chủ đề: Database · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nơi ứng dụng lưu dữ liệu và đọc lại dữ liệu. Khó ở chỗ dữ liệu phải đúng khi nhiều người cùng đọc, ghi, hoặc khi máy bị lỗi.
+
+**Nói đơn giản:** Isolation level quy định một transaction được nhìn thấy thay đổi của transaction khác tới đâu.
+
+**Từ khóa cần biết:** row = một dòng dữ liệu; query = câu hỏi gửi database; transaction = một nhóm thay đổi được xử lý cùng nhau.
+
+**Ví dụ dễ hình dung:** Một transaction đọc số dư trong khi transaction khác đang cập nhật; isolation level quyết định nó thấy số cũ, số mới hay phải chờ.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Isolation level là mức độ cô lập giữa các transaction chạy đồng thời mà engine hứa cho ứng dụng. SQL chuẩn định nghĩa bốn level, xếp từ yếu đến mạnh: READ UNCOMMITTED, READ COMMITTED, REPEATABLE READ, SERIALIZABLE. Level càng mạnh, transaction càng "giống chạy tuần tự" nhưng throughput và contention càng thấp.
+### Đọc nhanh trước khi đi sâu
 
-Engine hiện thực mỗi level khác nhau. PostgreSQL dùng MVCC snapshot ở mức câu (READ COMMITTED) hoặc transaction (REPEATABLE READ), SERIALIZABLE qua SSI (Serializable Snapshot Isolation). MySQL InnoDB cũng MVCC, kết hợp gap lock; mặc định REPEATABLE READ. Oracle chỉ hỗ trợ READ COMMITTED và SERIALIZABLE (qua `SERIALIZABLE` keyword) — không có READ UNCOMMITTED chuẩn, không REPEATABLE READ như SQL chuẩn. SQL Server hỗ trợ cả bốn với lock-based; dùng `SET TRANSACTION ISOLATION LEVEL`.
+**Ý chính:** Isolation level quy định một transaction được nhìn thấy thay đổi của transaction khác tới đâu.
 
-```mermaid
-flowchart LR
-    RU["READ UNCOMMITTED<br/>(rarely used)"]
-    RC["READ COMMITTED<br/>(PG/Oracle/MSSQL default)"]
-    RR["REPEATABLE READ<br/>(InnoDB default)"]
-    SR["SERIALIZABLE<br/>(SSI hoặc lock)"]
-    RU --> RC --> RR --> SR
-```
+**Ví dụ interview:** Một transaction đọc số dư trong khi transaction khác đang cập nhật; isolation level quyết định nó thấy số cũ, số mới hay phải chờ.
 
-*Sơ đồ vị trí: bốn level xếp theo strictness tăng dần. Engine thường mặc định READ COMMITTED hoặc REPEATABLE READ.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Transaction A và B cùng đọc hoặc sửa một vùng dữ liệu.
+2. Engine dùng snapshot, lock hoặc cả hai để quyết định visibility.
+3. Isolation level ngăn dirty read, non-repeatable read và phantom ở mức khác nhau.
+4. Level càng mạnh càng giảm anomaly nhưng có thể tăng wait, abort và contention.
 
-"Isolation level kiểm soát transaction thấy nhau thế nào khi chạy đồng thời. SQL chuẩn có bốn level: READ UNCOMMITTED (thấy cả uncommitted), READ COMMITTED (snapshot mỗi câu, không thấy uncommitted nhưng câu sau có thể khác câu trước), REPEATABLE READ (snapshot transaction, cùng transaction cùng câu thấy cùng dữ liệu), SERIALIZABLE (như chạy tuần tự). PostgreSQL mặc định READ COMMITTED, dùng MVCC; InnoDB mặc định REPEATABLE READ, dùng MVCC + gap lock; SERIALIZABLE dùng SSI ở PG hoặc lock mạnh ở InnoDB. Chọn level cao khi cần correctness tuyệt đối (báo cáo tài chính), thấp khi cần throughput (feed, log). Trong thực tế 80% OLTP chạy READ COMMITTED."
+**Nói như trong interview:** Isolation level quy định một transaction được nhìn thấy thay đổi của transaction khác tới đâu. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Bốn phenomena SQL chuẩn định nghĩa**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

@@ -4,31 +4,38 @@
 
 Chủ đề: Networking · Ngày: 2026-10-15
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách trình duyệt, ứng dụng và máy chủ gửi dữ liệu cho nhau. Mỗi bước có giao thức, độ trễ và kiểu lỗi riêng.
+
+**Nói đơn giản:** REST tổ chức API quanh resource, HTTP method và representation; stateless nghĩa là mỗi request tự mang đủ thông tin cần thiết.
+
+**Từ khóa cần biết:** client = bên gửi request; server = bên phục vụ; packet = mảnh dữ liệu đi qua mạng.
+
+**Ví dụ dễ hình dung:** GET /orders/42 lấy resource; PUT cùng body gửi lại nhiều lần vẫn nên cho cùng trạng thái cuối.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-**Định nghĩa.** REST (Representational State Transfer) là tập ràng buộc kiến trúc cho hệ thống phân tán, do Roy Fielding mô tả trong luận án tiến sĩ. Client thao tác trên resource (định danh bằng URI) thông qua representation (JSON, HTML...) và các method có ngữ nghĩa chuẩn của HTTP (RFC 9110).
-
-REST là phong cách, không phải chuẩn hay giao thức. "REST API" trong thực tế thường nghĩa là "HTTP API dùng JSON, URI theo resource", và thường không tuân thủ hết ràng buộc (đặc biệt HATEOAS).
-
-Giả định: bài này nói REST trên HTTP, theo nghĩa phổ biến trong phỏng vấn backend.
-
-```mermaid
-flowchart LR
-    C["Client<br/>browser, mobile, service"]
-    G["API gateway / CDN<br/>cache, auth, rate limit"]
-    S["Stateless API servers<br/>resources + representations"]
-    D[("Database")]
-    C -->|"HTTP: method + URI + headers"| G
-    G --> S
-    S --> D
-    S -->|"status + representation + links"| C
-```
-
-*Sơ đồ vị trí: client gọi API qua gateway/CDN; server stateless trả representation của resource, state nằm ở database.*
-
-**Trả lời 30 giây.** REST là phong cách kiến trúc dựa trên resource và các method chuẩn của HTTP. Ràng buộc chính: client-server, stateless (mỗi request tự chứa đủ thông tin), cacheable, uniform interface và layered system. Stateless cho phép scale ngang vì server nào cũng xử lý được request nào; cacheable cho phép CDN và client cache GET bằng `Cache-Control` và ETag. Đổi lại là mỗi request mang thêm context (token) và khó biểu diễn thao tác không thuần CRUD.
 
 ## 2. Cơ chế cốt lõi
+### Đọc nhanh trước khi đi sâu
+
+**Ý chính:** REST tổ chức API quanh resource, HTTP method và representation; stateless nghĩa là mỗi request tự mang đủ thông tin cần thiết.
+
+**Ví dụ interview:** GET /orders/42 lấy resource; PUT cùng body gửi lại nhiều lần vẫn nên cho cùng trạng thái cuối.
+
+**Luồng 4 bước:**
+
+1. Ứng dụng tạo request với tên host, port và dữ liệu.
+2. OS và các giao thức mạng tìm đường rồi chuyển packet tới server.
+3. Server xử lý request và trả response qua kết nối phù hợp.
+4. Client kiểm tra response, cache hoặc render dữ liệu cho người dùng.
+
+**Nói như trong interview:** REST tổ chức API quanh resource, HTTP method và representation; stateless nghĩa là mỗi request tự mang đủ thông tin cần thiết. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Đọc nhanh trước khi đi sâu**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ### Bước 1. Resource và URI
 Resource là danh từ (`/orders/42`), không phải hành động (`/getOrder`). Quan hệ cha-con biểu diễn bằng đường dẫn (`/orders/42/items`). Một resource có thể có nhiều representation, chọn bằng `Accept`.

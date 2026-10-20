@@ -4,26 +4,36 @@
 
 Chủ đề: Memory - Runtime · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách chương trình dùng và thu hồi bộ nhớ khi đang chạy. Hiểu phần này giúp giải thích chậm, treo, crash và out-of-memory.
+
+**Nói đơn giản:** Garbage collector tìm object không còn đường nào dùng tới rồi thu hồi bộ nhớ, để lập trình viên không phải free thủ công.
+
+**Từ khóa cần biết:** object = dữ liệu đang sống; reference = đường trỏ tới object; runtime = phần thực thi chương trình.
+
+**Ví dụ dễ hình dung:** Request tạo nhiều object tạm; GC dọn object không còn reachable để heap không đầy mãi.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Garbage collection (GC) là cơ chế runtime tự động thu hồi bộ nhớ của object không còn được chương trình tham chiếu. Khác với manual `malloc`/`free` (C/C++), GC giúp developer tránh raw leak, double-free, use-after-free. Đánh đổi: chi phí CPU cho tracing, GC pause (stop-the-world), khó đoán thời điểm thu hồi.
+### Đọc nhanh trước khi đi sâu
 
-```mermaid
-flowchart LR
-    Root["Root Set<br/>(stack, static, JNI, goroutine)"]
-    Live["Live Object<br/>(reachable)"]
-    Dead["Garbage<br/>(unreachable)"]
-    Free["Free Memory"]
-    Root --> Live
-    Live --> Dead
-    Dead --> Free
-```
+**Ý chính:** Garbage collector tìm object không còn đường nào dùng tới rồi thu hồi bộ nhớ, để lập trình viên không phải free thủ công.
 
-*Sơ đồ vị trí: GC bắt đầu từ root, đánh dấu (mark) object reachable, coi phần còn lại là garbage và thu hồi (sweep hoặc compact).*
+**Ví dụ interview:** Request tạo nhiều object tạm; GC dọn object không còn reachable để heap không đầy mãi.
 
-### Trả lời 30 giây
+**Luồng 4 bước:**
 
-"GC là cơ chế runtime tự động tìm và thu hồi object không còn được tham chiếu, giúp developer không phải gọi free/delete. Hai chiến lược chính: tracing GC (JVM, Go, V8) đánh dấu từ root, sweep object unreachable; reference counting (CPython, Swift ARC) đếm số tham chiếu, giảm về 0 là thu hồi. JVM có Serial/Parallel/G1 (mặc định Java 9+)/ZGC/Shenandoah. Go dùng tri-color concurrent mark-sweep, target pause < 1 ms. V8 chia thành young generation (Scavenger copying) và old generation (mark-sweep/compact). GC pause gây latency spike trong service yêu cầu tail latency thấp — giảm bằng concurrent GC (ZGC, Go) hoặc giảm allocation."
+1. Code tạo object hoặc vùng nhớ.
+2. Runtime giữ object còn được dùng và cung cấp reference cho code.
+3. Object không còn reachable sẽ được free hoặc garbage collector thu hồi.
+4. Nếu giữ nhầm, vùng nhớ phình lên và chương trình chậm hoặc hết RAM.
+
+**Nói như trong interview:** Garbage collector tìm object không còn đường nào dùng tới rồi thu hồi bộ nhớ, để lập trình viên không phải free thủ công. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Root set và reachability**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

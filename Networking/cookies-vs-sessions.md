@@ -4,37 +4,36 @@
 
 Chủ đề: Networking · Ngày: 2026-10-15
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách trình duyệt, ứng dụng và máy chủ gửi dữ liệu cho nhau. Mỗi bước có giao thức, độ trễ và kiểu lỗi riêng.
+
+**Nói đơn giản:** Cookie nằm trong request phía client; session là trạng thái phía server thường được tìm bằng một session ID trong cookie.
+
+**Từ khóa cần biết:** client = bên gửi request; server = bên phục vụ; packet = mảnh dữ liệu đi qua mạng.
+
+**Ví dụ dễ hình dung:** Browser gửi session_id trong cookie; server dùng ID đó tìm giỏ hàng trong session store.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Cookie là một cặp `name=value` do server gửi qua header `Set-Cookie` trong response, trình duyệt lưu lại theo (domain, path) và tự đính kèm vào các request tiếp theo qua header `Cookie`. Cookie có các cờ `HttpOnly`, `Secure`, `SameSite`, `Domain`, `Path`, `Max-Age`/`Expires`; giới hạn ~4KB mỗi cookie (xấp xỉ, phụ thuộc trình duyệt).
+### Đọc nhanh trước khi đi sâu
 
-Session là trạng thái của một lượt tương tác (đã đăng nhập, giỏ hàng) lưu phía server — in-memory, Redis, hoặc DB. Server sinh session ID ngẫu nhiên làm khóa tra trạng thái; ID thường được gửi qua cookie, nhưng cũng có thể qua URL hoặc hidden form.
+**Ý chính:** Cookie nằm trong request phía client; session là trạng thái phía server thường được tìm bằng một session ID trong cookie.
 
-Hai khái niệm không đối xứng. Cookie là phương tiện vận chuyển, session là trạng thái. Có thể có session mà không dùng cookie (URL rewriting); có cookie mà không có session (cookie tuỳ chọn giao diện).
+**Ví dụ interview:** Browser gửi session_id trong cookie; server dùng ID đó tìm giỏ hàng trong session store.
 
-Giả định: bài này nói về HTTP hiện đại (RFC 6265), focus session phía server có session ID mang bằng cookie. Không đi sâu Kerberos ticket, OAuth stateful, hay game networking.
+**Luồng 4 bước:**
 
-### Vị trí trong hệ thống
+1. Ứng dụng tạo request với tên host, port và dữ liệu.
+2. OS và các giao thức mạng tìm đường rồi chuyển packet tới server.
+3. Server xử lý request và trả response qua kết nối phù hợp.
+4. Client kiểm tra response, cache hoặc render dữ liệu cho người dùng.
 
-```mermaid
-flowchart LR
-  B["Browser<br/>(cookie store)"]
-  H["HTTP request<br/>Set-Cookie / Cookie"]
-  A["App server<br/>verify session ID"]
-  S["Session store<br/>(Redis, memory, DB)"]
-  T["Token = opaque session ID<br/>(không phải state)"]
-  B -- request + Cookie header --> A
-  A -- Set-Cookie on response --> B
-  A <-- lookup / save --> S
-  A -.gán session ID.-> T
-  T -.chứa state phiên.-> S
-```
-
-*Cookie là header HTTP + nơi lưu phía client. Session là state phía server, được khoá bằng session ID mà cookie mang theo.*
-
-### Trả lời 30 giây
-
-"Cookie là một header HTTP và một vùng lưu phía trình duyệt: server trả `Set-Cookie`, trình duyệt tự gửi `Cookie` cho mọi request cùng (domain, path) trong thời hạn. Session là trạng thái phía server; server sinh session ID ngẫu nhiên, lưu vào store và dùng cookie mang ID qua lại. Session ID chỉ là khoá tra — trạng thái thật nằm ở server, không có trong cookie. Cookie là phương tiện, session là trạng thái; cookie có thể không có session, session có thể không dùng cookie."
+**Nói như trong interview:** Cookie nằm trong request phía client; session là trạng thái phía server thường được tìm bằng một session ID trong cookie. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **2.1. Cookie như header HTTP — wire format ngắn**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

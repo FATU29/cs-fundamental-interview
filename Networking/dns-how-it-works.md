@@ -4,41 +4,38 @@
 
 Chủ đề: Networking · Ngày: 2026-10-15
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách trình duyệt, ứng dụng và máy chủ gửi dữ liệu cho nhau. Mỗi bước có giao thức, độ trễ và kiểu lỗi riêng.
+
+**Nói đơn giản:** DNS đổi tên dễ nhớ như api.example.com thành địa chỉ IP để máy biết kết nối tới đâu, rồi cache kết quả theo TTL.
+
+**Từ khóa cần biết:** client = bên gửi request; server = bên phục vụ; packet = mảnh dữ liệu đi qua mạng.
+
+**Ví dụ dễ hình dung:** Browser hỏi recursive resolver, resolver tra cache hoặc hỏi root, TLD và authoritative để lấy IP.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-DNS (Domain Name System) là cơ sở dữ liệu phân tán theo phân cấp tên miền, phục vụ nhiều loại bản ghi chứ không chỉ IP. Miền `api.example.com` trỏ tới IPv4 qua A record, IPv6 qua AAAA record, máy chủ mail qua MX record, tham số kết nối HTTPS qua HTTPS/SVCB record. DNS chạy trên UDP/TCP cổng 53, chuẩn hóa trong RFC 1034 và RFC 1035 (1987).
-
-Ba thành phần cốt lõi:
-
-- **Stub resolver** — mã trong OS/app (glibc `getaddrinfo`, Go `net.Resolver`) gửi truy vấn tới recursive resolver; không tự tra.
-- **Recursive resolver** — tiến trình độc lập (Unbound, BIND, Cloudflare 1.1.1.1, Google 8.8.8.8), đi hỏi root → TLD → authoritative, cache kết quả.
-- **Authoritative server** — chứa zone file gốc, trả lời với cờ `AA=1`, nguồn chân lý duy nhất cho TTL.
-
-```mermaid
----
-title: Vị trí DNS trong stack mạng
----
-flowchart LR
-    Client["Client<br/>(browser, SDK)"]
-    Stub["Stub resolver<br/>(OS/app)"]
-    Recursive["Recursive resolver<br/>(1.1.1.1, 8.8.8.8)"]
-    Root["Root server<br/>(.)"]
-    TLD["TLD server<br/>(.com)"]
-    Auth["Authoritative<br/>(example.com)"]
-
-    Client --> Stub
-    Stub --> Recursive
-    Recursive --> Root
-    Root --> Recursive
-    Recursive --> TLD
-    TLD --> Recursive
-    Recursive --> Auth
-    Auth --> Recursive
-```
-
-**Trả lời 30 giây:** DNS ánh xạ tên miền sang IP. Khi bạn gõ `example.com`, stub resolver gửi truy vấn đệ quy tới recursive resolver; recursive resolver đi hỏi root (.) → TLD (`.com`) → authoritative server của `example.com`; authoritative trả về A/AAAA record; recursive resolver cache kết quả theo TTL. Lần sau truy vấn cùng tên, kết quả trả từ cache, tiết kiệm 1–3 RTT (~10–100ms) so với truy vấn đầy đủ.
 
 ## 2. Cơ chế cốt lõi
+### Đọc nhanh trước khi đi sâu
+
+**Ý chính:** DNS đổi tên dễ nhớ như api.example.com thành địa chỉ IP để máy biết kết nối tới đâu, rồi cache kết quả theo TTL.
+
+**Ví dụ interview:** Browser hỏi recursive resolver, resolver tra cache hoặc hỏi root, TLD và authoritative để lấy IP.
+
+**Luồng 4 bước:**
+
+1. Ứng dụng tạo request với tên host, port và dữ liệu.
+2. OS và các giao thức mạng tìm đường rồi chuyển packet tới server.
+3. Server xử lý request và trả response qua kết nối phù hợp.
+4. Client kiểm tra response, cache hoặc render dữ liệu cho người dùng.
+
+**Nói như trong interview:** DNS đổi tên dễ nhớ như api.example.com thành địa chỉ IP để máy biết kết nối tới đâu, rồi cache kết quả theo TTL. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Đọc nhanh trước khi đi sâu**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ### 2.1. Luồng phân giải từ đầu tới cuối
 

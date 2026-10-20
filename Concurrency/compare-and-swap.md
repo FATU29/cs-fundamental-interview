@@ -4,28 +4,36 @@
 
 Chủ đề: Concurrency · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nhiều việc cùng chạy trong một chương trình. Khó ở chỗ các việc có thể chạm cùng dữ liệu và làm kết quả sai nếu không phối hợp.
+
+**Nói đơn giản:** CAS là thao tác: chỉ ghi giá trị mới nếu giá trị hiện tại vẫn đúng như mình đã đọc. Nó giúp nhiều luồng sửa cùng một biến mà không cần khóa ngay từ đầu.
+
+**Từ khóa cần biết:** thread = luồng chạy; shared state = dữ liệu dùng chung; synchronization = cách phối hợp luồng.
+
+**Ví dụ dễ hình dung:** Hai request cùng cập nhật số lượng tồn kho từ 10 xuống 9. CAS giúp chỉ một request ghi thành công trên phiên bản mà nó đã đọc.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-CAS là một atomic primitive. Trên CPU, nó là một instruction duy nhất (`CMPXCHG` trên x86, `LDADD`/`STXR` trên ARM, `LL/SC` trên một số kiến trúc RISC), đảm bảo nguyên tử: bước đọc-kiểm-tra-ghi xảy ra như một đơn vị duy nhất với phần cứng, không bị xen giữa bởi thread khác.
+### Đọc nhanh trước khi đi sâu
 
-Theo nhóm câu hỏi gốc: "What is an atomic operation?" — thuật ngữ "atomic" trong bối cảnh CAS chỉ tính không-thể-bị-xen. Một operation atomic được thực thi như thể là duy nhất một bước, không có khoảng trống cho thread khác xen vào đọc-ghi giữa các bước con. CAS là một trong các atomic operation; các operation atomic khác gồm `fetch_add`, `fetch_or`, `exchange` (atomic swap), `load`/`store` với memory ordering cụ thể.
+**Ý chính:** CAS là thao tác: chỉ ghi giá trị mới nếu giá trị hiện tại vẫn đúng như mình đã đọc. Nó giúp nhiều luồng sửa cùng một biến mà không cần khóa ngay từ đầu.
 
-Một operation atomic nhưng vẫn có thể thất bại là đặc tính của CAS: khi giá trị không bằng kỳ vọng, CAS không ghi và trả fail. Caller dùng cơ chế retry (compare-and-swap loop / CAS loop) để tiếp tục thử.
+**Ví dụ interview:** Hai request cùng cập nhật số lượng tồn kho từ 10 xuống 9. CAS giúp chỉ một request ghi thành công trên phiên bản mà nó đã đọc.
 
-```mermaid
-flowchart TD
-    Thread1["Thread 1"] -->|"CAS(addr, expected=A, new=B)"| HW["CPU:<br/>CMPXCHG (x86)<br/>LDXR/STXR (ARM)"]
-    Thread2["Thread 2"] -->|"CAS(addr, expected=A, new=C)"| HW
-    HW -->|"atomic compare"| Mem["Memory location<br/>= A hiện tại"]
-    Mem -->|"= A → write B<br/>return success"| Thread1
-    Mem -->|"= B (đã đổi)<br/>return fail"| Thread2
-```
+**Luồng 4 bước:**
 
-*Sơ đồ vị trí: hai thread cùng gọi CAS trên cùng memory address với `expected` cũ = A. CPU atomic compare thấy giá trị hiện tại = A, thread 1 thắng (CAS thành công → B). Thread 2 retry nếu cần để cập nhật từ B sang C.*
+1. Có nhiều task cùng chạy.
+2. Các task chạm vào dữ liệu hoặc tài nguyên chung.
+3. Chương trình dùng message passing, atomic hoặc lock để phối hợp.
+4. Task tiếp tục và kết quả không bị mất, trùng hoặc kẹt.
 
-### Trả lời 30 giây
-
-"Compare-and-swap là instruction CPU nguyên tử: đọc giá trị memory, so sánh với `expected`, nếu bằng thì ghi `new` và trả success; nếu không thì không ghi và trả fail. CAS là building block của lock-free data structure và fast path của mutex hiện đại (Linux futex, Java `AtomicInteger`, C++ `std::atomic`). Thuật toán CAS loop — đọc, tính, CAS, nếu fail thì thử lại — cho phép implement counter, queue, stack không cần mutex. Đánh đổi: không block nhưng có thể live-lock khi contention cực cao (thread retry liên tục); vẫn không cho tính composite — nhiều bước phải dùng CAS từng bước hoặc mutex."
+**Nói như trong interview:** CAS là thao tác: chỉ ghi giá trị mới nếu giá trị hiện tại vẫn đúng như mình đã đọc. Nó giúp nhiều luồng sửa cùng một biến mà không cần khóa ngay từ đầu. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. CAS là một instruction nguyên tử trên CPU**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 
@@ -180,7 +188,7 @@ Biến thể lỗi 2: contention cao, 100 thread cùng CAS. Mỗi fail burn CPU 
   ```
 - Trade-off: CAS lock-free không switch context, giữ CPU. Mutex block giải phóng CPU nhưng mất ~1-10 µs để wake.
 - Contention: nhiều thread tăng cùng counter → CAS fail nhiều → "thundering herd" với retry. Mutex serialize các thread; CAS retry song song.
-- Trên x86, `LOCK INC` là atomic primitive hiệu quả hơn `LOCK CMPXCHG` cho increment đơn giản (1 micro-op). 
+- Trên x86, `LOCK INC` là atomic primitive hiệu quả hơn `LOCK CMPXCHG` cho increment đơn giản (1 micro-op).
 - Java: `AtomicInteger.incrementAndGet()` dùng CAS loop hoặc `AtomicLongFieldUpdater` cho counter long. Go: `sync/atomic.AddInt64`.
 
 **Bẫy:** "Lock-free lúc nào cũng nhanh hơn mutex". Sai — chỉ thắng khi contention thấp. Contention cao, mutex serialize, lock-free retry storm, có thể chậm hơn 10×.

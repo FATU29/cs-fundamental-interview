@@ -4,40 +4,38 @@
 
 Chủ đề: Networking · Ngày: 2026-10-15
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách trình duyệt, ứng dụng và máy chủ gửi dữ liệu cho nhau. Mỗi bước có giao thức, độ trễ và kiểu lỗi riêng.
+
+**Nói đơn giản:** Dùng UDP khi dữ liệu mới quan trọng hơn dữ liệu cũ hoặc ứng dụng tự xử lý retry, thứ tự và mất gói.
+
+**Từ khóa cần biết:** client = bên gửi request; server = bên phục vụ; packet = mảnh dữ liệu đi qua mạng.
+
+**Ví dụ dễ hình dung:** Voice call ưu tiên âm thanh hiện tại hơn việc chờ một packet cũ, nên có thể bỏ packet mất thay vì retransmit.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-UDP (User Datagram Protocol, RFC 768) là giao thức tầng vận chuyển không kết nối, chỉ thêm 8 byte header (port × 2, length, checksum) so với IP. Khác TCP ở bốn điểm cốt lõi: không handshake, không ACK/retransmit, không flow/congestion control, datagram đến độc lập với nhau (không head-of-line blocking). Cái giá: ứng dụng tự chịu trách nhiệm về mất gói, trùng, lệch thứ tự, và tự giới hạn tốc độ gửi — không làm thì làm nghẽn mạng.
-
-Giả định: bài này so sánh UDP với TCP, tập trung vào quyết định chọn UDP. Chi tiết header/handshake/congestion control của TCP có trong bài [TCP vs UDP](tcp-vs-udp.md). Không đi sâu vào SCTP, DCCP hay các giao thức tầng vận chuyển khác.
-
-```mermaid
-flowchart LR
-    Start["Cần gửi<br/>dữ liệu?"]
-    Q1{"Dữ liệu cũ<br/>vô giá trị?"}
-    Q2{"Cần multicast<br/>/ broadcast?"}
-    Q3{"Request-response<br/>1 RTT, payload nhỏ?"}
-    Q4{"Tự code reliability<br/>+ congestion control?"}
-    Q5{"Cần đúng thứ tự<br/>+ đủ dữ liệu?"}
-    UDP["UDP thuần"]
-    QUIC["QUIC / HTTP/3<br/>(reliable trên UDP)"]
-    TCP["TCP"]
-    Start --> Q1
-    Q1 -- "Có: game state,<br/>telemetry, RTP" --> Q2
-    Q1 -- "Không" --> Q5
-    Q2 -- "Có: DHCP, mDNS" --> UDP
-    Q2 -- "Không" --> Q3
-    Q3 -- "Có: DNS, NTP" --> UDP
-    Q3 -- "Không" --> Q4
-    Q4 -- "Có: WebRTC,<br/>custom game" --> UDP
-    Q4 -- "Không, cần reliable" --> QUIC
-    Q5 -- "Có: API, file,<br/>thanh toán" --> TCP
-```
-
-*Cây quyết định: bắt đầu từ "dữ liệu cũ vô giá trị?" — nếu có hỏi tiếp multicast → request-response → tự code; nếu không đi thẳng tới TCP. QUIC nằm giữa: reliable trên UDP nhưng không phải tự code.*
-
-**Trả lời 30 giây:** Dùng UDP khi dữ liệu cũ vô giá trị (game state 60 Hz, voice/video RTP — frame mới thay thế frame cũ), khi cần broadcast/multicast (DHCP, mDNS), khi request-response 1 RTT payload nhỏ (DNS, NTP), hoặc khi tự code reliability + congestion control (QUIC/HTTP/3, WebRTC, custom game protocol). KHÔNG dùng UDP khi cần đúng thứ tự + đủ dữ liệu (thanh toán, file transfer, API CRUD). Lý do cốt lõi: TCP có head-of-line blocking — mất 1 segment chặn cả connection; UDP cho phép packet sau đến trước packet mất, app tự quyết định gói nào còn giá trị. Đánh đổi: tự chịu mọi thứ TCP làm hộ — sai một chỗ là làm nghẽn mạng hoặc mất dữ liệu không kiểm soát.
 
 ## 2. Cơ chế cốt lõi
+### Đọc nhanh trước khi đi sâu
+
+**Ý chính:** Dùng UDP khi dữ liệu mới quan trọng hơn dữ liệu cũ hoặc ứng dụng tự xử lý retry, thứ tự và mất gói.
+
+**Ví dụ interview:** Voice call ưu tiên âm thanh hiện tại hơn việc chờ một packet cũ, nên có thể bỏ packet mất thay vì retransmit.
+
+**Luồng 4 bước:**
+
+1. Ứng dụng tạo request với tên host, port và dữ liệu.
+2. OS và các giao thức mạng tìm đường rồi chuyển packet tới server.
+3. Server xử lý request và trả response qua kết nối phù hợp.
+4. Client kiểm tra response, cache hoặc render dữ liệu cho người dùng.
+
+**Nói như trong interview:** Dùng UDP khi dữ liệu mới quan trọng hơn dữ liệu cũ hoặc ứng dụng tự xử lý retry, thứ tự và mất gói. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Đọc nhanh trước khi đi sâu**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ### Bước 1. Datagram, MTU và giới hạn kích thước
 

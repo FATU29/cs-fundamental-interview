@@ -4,27 +4,36 @@
 
 Chủ đề: Memory - Runtime · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách chương trình dùng và thu hồi bộ nhớ khi đang chạy. Hiểu phần này giúp giải thích chậm, treo, crash và out-of-memory.
+
+**Nói đơn giản:** Stack giữ dữ liệu gắn với lời gọi hàm; heap giữ object sống lâu hoặc có kích thước động. Nhầm hai vùng thường gây stack overflow hoặc out-of-memory.
+
+**Từ khóa cần biết:** object = dữ liệu đang sống; reference = đường trỏ tới object; runtime = phần thực thi chương trình.
+
+**Ví dụ dễ hình dung:** Mỗi lần gọi hàm tạo frame trên stack; object đơn hàng cần sống sau khi hàm trả về thường nằm trên heap.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Stack và heap là hai vùng nhớ trong process, phục vụ mục đích khác nhau. Stack là vùng nhớ LIFO được quản lý tự động theo call frame, cấp phát khi function được gọi và thu hồi khi function return; kích thước thường cố định vài MB, rất nhanh. Heap là vùng nhớ cấp phát động, kích thước lớn (GB), sống độc lập với function call, được quản lý bởi allocator (glibc malloc, jemalloc, Go runtime, JVM GC, V8 GC).
+### Đọc nhanh trước khi đi sâu
 
-```mermaid
-flowchart TB
-    Stack["Stack<br/>LIFO, vài MB<br/>auto alloc/free"]
-    Heap["Heap<br/>dynamic, GB<br/>allocator / GC"]
-    Code["Code / Text"]
-    Data["Data / BSS<br/>global, static"]
-    Stack --- Heap
-    Stack --- Code
-    Heap --- Code
-    Stack --- Data
-```
+**Ý chính:** Stack giữ dữ liệu gắn với lời gọi hàm; heap giữ object sống lâu hoặc có kích thước động. Nhầm hai vùng thường gây stack overflow hoặc out-of-memory.
 
-*Sơ đồ vị trí: process memory layout — stack (frame gọn), heap (cấp phát động), code (chỉ đọc), data/BSS (global/static). Stack thường ở high address, heap mọc lên.*
+**Ví dụ interview:** Mỗi lần gọi hàm tạo frame trên stack; object đơn hàng cần sống sau khi hàm trả về thường nằm trên heap.
 
-### Trả lời 30 giây
+**Luồng 4 bước:**
 
-"Stack là vùng nhớ LIFO quản lý call frame: mỗi function push frame khi gọi, pop frame khi return; cấp phát rẻ (vài ns, chỉ tăng/giảm con trỏ), kích thước giới hạn (Linux mặc định 8 MB cho main thread, có thể tăng bằng `ulimit -s` hoặc thread stack option). Heap là vùng nhớ cấp phát động, kích thước tới GB, được quản lý bởi malloc/glibc/jemalloc hoặc GC (JVM, Go, V8). Stack lưu local variable, return address, frame pointer; heap lưu object, struct lớn, dynamic data. Stack overflow khi đệ quy quá sâu hoặc mảng local quá lớn; heap overflow (OOM) khi cấp phát vượt bộ nhớ khả dụng hoặc fragment nặng."
+1. Code tạo object hoặc vùng nhớ.
+2. Runtime giữ object còn được dùng và cung cấp reference cho code.
+3. Object không còn reachable sẽ được free hoặc garbage collector thu hồi.
+4. Nếu giữ nhầm, vùng nhớ phình lên và chương trình chậm hoặc hết RAM.
+
+**Nói như trong interview:** Stack giữ dữ liệu gắn với lời gọi hàm; heap giữ object sống lâu hoặc có kích thước động. Nhầm hai vùng thường gây stack overflow hoặc out-of-memory. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Stack frame và cơ chế push/pop**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

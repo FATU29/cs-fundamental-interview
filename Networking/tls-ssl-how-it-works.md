@@ -6,41 +6,36 @@
 
 Chủ đề: Networking · Ngày: 2026-10-15
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách trình duyệt, ứng dụng và máy chủ gửi dữ liệu cho nhau. Mỗi bước có giao thức, độ trễ và kiểu lỗi riêng.
+
+**Nói đơn giản:** TLS thương lượng khóa rồi mã hóa từng record, đồng thời dùng certificate để client kiểm tra mình đang nói chuyện với đúng server.
+
+**Từ khóa cần biết:** client = bên gửi request; server = bên phục vụ; packet = mảnh dữ liệu đi qua mạng.
+
+**Ví dụ dễ hình dung:** Client kiểm tra certificate, hai bên dùng ECDHE tạo secret rồi mã hóa request bằng khóa phiên.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-### Định nghĩa
+### Đọc nhanh trước khi đi sâu
 
-TLS (Transport Layer Security, RFC 8446 cho 1.3) là giao thức tầng 4-5 chạy trên TCP (hoặc UDP qua QUIC) ở cổng 443, cung cấp ba thứ: confidentiality (mã hóa AEAD), integrity (authentication tag) và authentication (chuỗi cert X.509 do CA ký). "SSL" ngày nay chỉ là tên quen gọi: SSL 2.0/3.0 đã deprecated, TLS 1.0/1.1 cũng deprecated; thực tế còn dùng là TLS 1.2 và 1.3.
+**Ý chính:** TLS thương lượng khóa rồi mã hóa từng record, đồng thời dùng certificate để client kiểm tra mình đang nói chuyện với đúng server.
 
-Ba mục tiêu theo thứ tự: (1) confidentiality nhờ AEAD (AES-GCM, ChaCha20-Poly1305); (2) integrity nhờ authentication tag 128 bit; (3) authentication nhờ chuỗi cert X.509 chain về root trong trust store. Server authentication là mặc định; client authentication (mTLS) tùy chọn.
+**Ví dụ interview:** Client kiểm tra certificate, hai bên dùng ECDHE tạo secret rồi mã hóa request bằng khóa phiên.
 
-TLS nằm giữa TCP và Application. QUIC (RFC 9000) tích hợp TLS 1.3 vào chính nó (HTTP/3 chạy trên QUIC). Forward secrecy là mặc định ở TLS 1.3 nhờ ECDHE ephemeral.
+**Luồng 4 bước:**
 
-Giả định: trọng tâm TLS 1.3, so sánh với TLS 1.2 khi hành vi khác. Bài không đi sâu SSL 2.0/3.0, renegotiation, hoặc post-quantum. Xem bài [HTTP vs HTTPS](http-vs-https.md) cho ảnh tổng quan HTTP/TLS; bài này tách riêng phần crypto và trust.
+1. Ứng dụng tạo request với tên host, port và dữ liệu.
+2. OS và các giao thức mạng tìm đường rồi chuyển packet tới server.
+3. Server xử lý request và trả response qua kết nối phù hợp.
+4. Client kiểm tra response, cache hoặc render dữ liệu cho người dùng.
 
-### Vị trí trong hệ thống
-
-```mermaid
-flowchart TB
-    A["Application<br/>HTTP, gRPC, SMTP"]
-    T["TLS record layer<br/>AEAD: AES-GCM / ChaCha20-Poly1305"]
-    TCP["TCP<br/>stream tin cay, in-order"]
-    IP["IP / UDP (QUIC)"]
-    A --> T --> TCP --> IP
-
-    Client["Client<br/>(browser, mobile, SDK)"]
-    Server["Server / mTLS peer"]
-    Client -->|handshake 1 RTT<br/>TLS 1.3| Server
-
-    CA["CA / trust store<br/>(xac thuc cert, CT log)"]
-    Server -.->|cert chain<br/>ky boi CA| CA
-```
-
-*TLS nằm giữa Application và TCP. Cert chain do CA ký, trust do trust store quyết định.*
-
-### Trả lời 30 giây
-
-"TLS là giao thức trên TCP (cổng 443) cung cấp confidentiality, integrity và authentication. TLS 1.3 hoàn tất handshake trong 1 RTT: client gửi key share ECDHE (X25519) trong ClientHello, server trả Certificate + CertificateVerify + Finished, từ đây mọi thứ đã mã hóa bằng session key dẫn xuất từ ECDHE shared secret qua HKDF. Public-key chỉ dùng cho handshake; dữ liệu dùng symmetric AEAD vì nhanh hơn public-key cỡ 1000 lần. Server xác thực qua chuỗi cert X.509 chain về root; forward secrecy đạt nhờ ECDHE."
+**Nói như trong interview:** TLS thương lượng khóa rồi mã hóa từng record, đồng thời dùng certificate để client kiểm tra mình đang nói chuyện với đúng server. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. ClientHello (client -> server, plaintext)**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

@@ -4,29 +4,36 @@
 
 Chủ đề: Concurrency · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nhiều việc cùng chạy trong một chương trình. Khó ở chỗ các việc có thể chạm cùng dữ liệu và làm kết quả sai nếu không phối hợp.
+
+**Nói đơn giản:** Thread pool tạo sẵn một nhóm luồng, rồi cho các luồng lấy việc từ hàng đợi. Cách này tránh tạo quá nhiều luồng và giới hạn tải.
+
+**Từ khóa cần biết:** thread = luồng chạy; shared state = dữ liệu dùng chung; synchronization = cách phối hợp luồng.
+
+**Ví dụ dễ hình dung:** API nhận 10.000 request nhưng chỉ cho 100 task gọi database cùng lúc bằng pool và queue có giới hạn.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Thread pool là một tập hợp thread được tạo trước (pre-spawned) và sống lâu dài để xử lý các task từ một hàng đợi (work queue). Khi có task mới, một thread rảnh trong pool nhận và xử lý; khi xong, thread quay lại pool chờ task tiếp. Không tạo thread mới cho mỗi task, không hủy thread khi xong.
+### Đọc nhanh trước khi đi sâu
 
-Thread pool giải chi phí tạo thread (Linux `clone` ~1ms, JVM Thread ~1ms, goroutine ~50µs). Quan trọng hơn: thread pool giới hạn số thread đồng thời, ngăn hệ thống bị quá tải khi workload đột biến. Nếu không có pool, một request burst có thể tạo hàng nghìn thread, mỗi thread 1-8MB stack, dẫn đến OOM hoặc context switch storm.
+**Ý chính:** Thread pool tạo sẵn một nhóm luồng, rồi cho các luồng lấy việc từ hàng đợi. Cách này tránh tạo quá nhiều luồng và giới hạn tải.
 
-```mermaid
-flowchart LR
-    Q["Work Queue<br/>(blocking queue)"] --> T1["Thread 1"]
-    Q --> T2["Thread 2"]
-    Q --> T3["Thread 3"]
-    Q --> TN["Thread N"]
-    T1 --> Done["Task hoàn tất<br/>thread quay về pool"]
-    T2 --> Done
-    T3 --> Done
-    TN --> Done
-```
+**Ví dụ interview:** API nhận 10.000 request nhưng chỉ cho 100 task gọi database cùng lúc bằng pool và queue có giới hạn.
 
-*Sơ đồ vị trí: task được đẩy vào queue; các thread trong pool lấy task, xử lý, quay về chờ task tiếp.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Có nhiều task cùng chạy.
+2. Các task chạm vào dữ liệu hoặc tài nguyên chung.
+3. Chương trình dùng message passing, atomic hoặc lock để phối hợp.
+4. Task tiếp tục và kết quả không bị mất, trùng hoặc kẹt.
 
-"Thread pool là tập thread pre-spawned lấy task từ queue. Lý do dùng: (1) tránh chi phí tạo/hủy thread mỗi task (vài ms OS, có thể gây bottleneck); (2) giới hạn concurrency, ngăn OOM khi request burst; (3) cho phép backpressure — task quá tải vào queue hoặc bị reject. Cấu hình quan trọng: corePoolSize (thread tối thiểu), maxPoolSize (thread tối đa), queueCapacity (queue tối đa), keepAliveTime (thread idle bao lâu thì hủy), rejectionPolicy (Abort, Discard, CallerRuns). Ví dụ: Java ThreadPoolExecutor, Python concurrent.futures.ThreadPoolExecutor, Go worker pool pattern (channel + N goroutine)."
+**Nói như trong interview:** Thread pool tạo sẵn một nhóm luồng, rồi cho các luồng lấy việc từ hàng đợi. Cách này tránh tạo quá nhiều luồng và giới hạn tải. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Vòng đời một task trong pool**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

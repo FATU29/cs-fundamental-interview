@@ -4,25 +4,36 @@
 
 Chủ đề: Memory - Runtime · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách chương trình dùng và thu hồi bộ nhớ khi đang chạy. Hiểu phần này giúp giải thích chậm, treo, crash và out-of-memory.
+
+**Nói đơn giản:** Mark-and-sweep quét một vùng nhớ; generational GC chia object theo tuổi để xử lý nhanh nhóm object mới thường chết sớm.
+
+**Từ khóa cần biết:** object = dữ liệu đang sống; reference = đường trỏ tới object; runtime = phần thực thi chương trình.
+
+**Ví dụ dễ hình dung:** Object của request thường chết nhanh nên minor GC chỉ cần quét young generation thay vì quét toàn heap.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Mark-and-sweep là chiến lược GC đơn giản: đánh dấu (mark) tất cả object reachable từ root, sau đó sweep (giải phóng) object không đánh dấu. Generational GC dựa trên generational hypothesis (hầu hết object chết trẻ), chia heap thành nhiều thế hệ (young generation cho object mới, old generation cho object sống lâu), chạy minor GC thường xuyên trên young (nhanh), major GC ít hơn trên old (đắt hơn nhưng cần thiết).
+### Đọc nhanh trước khi đi sâu
 
-```mermaid
-flowchart LR
-    MS["Mark-Sweep<br/>(single space)"]
-    G1["Generational<br/>Young / Old"]
-    Y["Young Gen<br/>(minor GC, nhanh)"]
-    O["Old Gen<br/>(major GC, lâu hơn)"]
-    MS -->|tiến hoá| G1
-    G1 --> Y --> O
-```
+**Ý chính:** Mark-and-sweep quét một vùng nhớ; generational GC chia object theo tuổi để xử lý nhanh nhóm object mới thường chết sớm.
 
-*Sơ đồ vị trí: mark-and-sweep là baseline (một không gian, một kiểu sweep), generational chia thành hai không gian với chiến lược GC riêng cho mỗi generation.*
+**Ví dụ interview:** Object của request thường chết nhanh nên minor GC chỉ cần quét young generation thay vì quét toàn heap.
 
-### Trả lời 30 giây
+**Luồng 4 bước:**
 
-"Mark-and-sweep đơn giản: hai pha mark (duyệt từ root, đánh dấu live) và sweep (giải phóng dead). Một heap, một kiểu GC. Nhược: stop-the-world dài, external fragmentation. Generational GC dựa trên hypothesis rằng phần lớn object chết trẻ: chia heap thành young generation (object mới, GC thường xuyên, nhanh) và old generation (object sống lâu, GC ít, lâu hơn). Minor GC (young) dùng copying hoặc mark-sweep nhanh, major GC (old) dùng mark-sweep/compact. JVM G1 là generational + region, mặc định Java 9+. V8 New Space (Scavenger copying) + Old Space (mark-sweep/compact). Mark-and-sweep đơn giản phù hợp vùng nhớ nhỏ; generational cho throughput cao khi heap lớn."
+1. Code tạo object hoặc vùng nhớ.
+2. Runtime giữ object còn được dùng và cung cấp reference cho code.
+3. Object không còn reachable sẽ được free hoặc garbage collector thu hồi.
+4. Nếu giữ nhầm, vùng nhớ phình lên và chương trình chậm hoặc hết RAM.
+
+**Nói như trong interview:** Mark-and-sweep quét một vùng nhớ; generational GC chia object theo tuổi để xử lý nhanh nhóm object mới thường chết sớm. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Mark-and-sweep chi tiết**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

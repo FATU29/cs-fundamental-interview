@@ -4,24 +4,36 @@
 
 Chủ đề: Memory - Runtime · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách chương trình dùng và thu hồi bộ nhớ khi đang chạy. Hiểu phần này giúp giải thích chậm, treo, crash và out-of-memory.
+
+**Nói đơn giản:** Memory leak là bộ nhớ vẫn bị giữ dù chương trình không còn cần. Chương trình có thể tăng RAM dần rồi bị hệ điều hành kill.
+
+**Từ khóa cần biết:** object = dữ liệu đang sống; reference = đường trỏ tới object; runtime = phần thực thi chương trình.
+
+**Ví dụ dễ hình dung:** Cache giữ mãi key của user cũ dù không request nào dùng; RSS tăng dần qua nhiều giờ.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Memory leak là tình trạng chương trình cấp phát bộ nhớ nhưng không trả lại khi không còn dùng, khiến bộ nhớ tiêu thụ tăng đơn điều theo thời gian (workload không đổi). Trong managed runtime (JVM, Go, V8, CPython), GC vẫn không thu hồi được nếu vẫn còn tham chiếu khả đến từ gốc (root) — đây là "logical leak" hay gặp nhất. Trong C/C++ thường là "raw leak" do `malloc` không `free` hoặc pointer thất lạc.
+### Đọc nhanh trước khi đi sâu
 
-```mermaid
-flowchart LR
-    App["Process / Runtime"]
-    Alloc["Allocator<br/>(malloc, jvm heap, go heap, v8 heap)"]
-    Reachable["Reachable graph<br/>(root -> object)"]
-    Leak["Leaked memory<br/>(không có root, hoặc root vẫn giữ)"]
-    App --> Alloc --> Reachable --> Leak
-```
+**Ý chính:** Memory leak là bộ nhớ vẫn bị giữ dù chương trình không còn cần. Chương trình có thể tăng RAM dần rồi bị hệ điều hành kill.
 
-*Sơ đồ vị trí: bộ nhớ được cấp qua allocator, GC chỉ thu hồi phần không còn reachable; phần còn reachable nhưng ứng dụng không dùng chính là leak.*
+**Ví dụ interview:** Cache giữ mãi key của user cũ dù không request nào dùng; RSS tăng dần qua nhiều giờ.
 
-### Trả lời 30 giây
+**Luồng 4 bước:**
 
-"Memory leak là bộ nhớ được cấp phát nhưng không bao giờ được giải phóng lại cho hệ thống (C/C++) hoặc không bao giờ trở nên unreachable để GC thu hồi (managed runtime). Trong JVM/C#/Go dù có GC, leak vẫn xảy ra khi một collection lớn được giữ bởi một static field hoặc một listener đăng ký không huỷo. Cách phát hiện: (1) theo dõi RSS/heap sau GC — nếu đường baseline tăng đơn điều theo thời gian thì có leak; (2) chụp heap dump (jmap/jcmd, pprof) rồi phân tích retained size; (3) dùng `valgrind --leak-check=full` hoặc AddressSanitizer cho native. Phân biệt với memory bị giữ tạm bởi cache/pool — đó là footprint, không phải leak nếu bounded.
+1. Code tạo object hoặc vùng nhớ.
+2. Runtime giữ object còn được dùng và cung cấp reference cho code.
+3. Object không còn reachable sẽ được free hoặc garbage collector thu hồi.
+4. Nếu giữ nhầm, vùng nhớ phình lên và chương trình chậm hoặc hết RAM.
+
+**Nói như trong interview:** Memory leak là bộ nhớ vẫn bị giữ dù chương trình không còn cần. Chương trình có thể tăng RAM dần rồi bị hệ điều hành kill. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Phân biệt hai loại memory leak**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

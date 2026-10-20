@@ -4,28 +4,36 @@
 
 Chủ đề: OOP - Design Patterns · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách tổ chức code thành những đối tượng dễ thay đổi. Mục tiêu là giữ luật của nghiệp vụ rõ ràng và tránh code phụ thuộc chặt vào nhau.
+
+**Nói đơn giản:** Strategy tách các cách xử lý khác nhau thành các object thay thế được, thay vì một if-else dài.
+
+**Từ khóa cần biết:** class = khuôn; object = instance cụ thể; method = hành vi mà object cung cấp.
+
+**Ví dụ dễ hình dung:** ShippingService chọn StandardShipping hoặc ExpressShipping qua cùng interface thay vì một switch lớn.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Strategy pattern thuộc nhóm behavioral trong GoF, định nghĩa một họ thuật toán, đóng gói mỗi thuật toán và làm cho chúng có thể thay thế lẫn nhau. Pattern cho phép thuật toán thay đổi độc lập với client sử dụng nó. Thay vì dùng if-else hoặc switch-case dài để chọn hành vi, mỗi hành vi trở thành một class riêng (ConcreteStrategy) implement cùng interface (Strategy).
+### Đọc nhanh trước khi đi sâu
 
-Strategy giải quyết vấn đề "code thay đổi theo context": ví dụ tính giá shipping theo vùng, sort theo nhiều tiêu chí, nén file theo format. Mỗi strategy là một thuật toán hoàn chỉnh có thể thay thế. Pattern này cũng là nền tảng cho dependency injection: client chỉ biết Strategy interface, có thể inject strategy khác nhau theo config.
+**Ý chính:** Strategy tách các cách xử lý khác nhau thành các object thay thế được, thay vì một if-else dài.
 
-```mermaid
-flowchart LR
-    C["Context"]
-    S1["Strategy A<br/>(sort)"]
-    S2["Strategy B<br/>(filter)"]
-    S3["Strategy C<br/>(ship)"]
-    C --> S1
-    C --> S2
-    C --> S3
-```
+**Ví dụ interview:** ShippingService chọn StandardShipping hoặc ExpressShipping qua cùng interface thay vì một switch lớn.
 
-*Sơ đồ vị trí: Context giữ reference tới Strategy interface; có thể thay đổi ConcreteStrategy runtime. Mỗi ConcreteStrategy đóng gói một thuật toán độc lập.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Client gọi một contract dễ hiểu.
+2. Object hoặc pattern chọn code thực hiện phía sau contract.
+3. State và dependency được giữ ở nơi có trách nhiệm rõ ràng.
+4. Khi requirement đổi, thay implementation mà giảm ảnh hưởng tới client.
 
-"Strategy pattern giải quyết vấn đề có nhiều cách làm một việc và cần chọn linh hoạt runtime. Thay vì if-else/switch phân nhánh, mỗi nhánh trở thành một class implement cùng Strategy interface; client giữ reference Strategy, có thể thay strategy runtime. Ví dụ thực tế: PaymentStrategy (CreditCard, PayPal, Crypto); SortStrategy (QuickSort, MergeSort theo data size); CompressionStrategy (Zip, Gzip); ShippingStrategy (Standard, Express, SameDay). Strategy khác Command: Command encapsulate request để queue/log; Strategy chọn thuật toán. Khác State: State có state machine, state nào quyết định hành vi tiếp theo; Strategy độc lập, chuyển qua lại tự do. Lợi ích chính: tránh code phình to khi thêm thuật toán mới chỉ cần tạo class mới, không sửa client; tuân thủ Open/Closed."
+**Nói như trong interview:** Strategy tách các cách xử lý khác nhau thành các object thay thế được, thay vì một if-else dài. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Ba thành phần chuẩn**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

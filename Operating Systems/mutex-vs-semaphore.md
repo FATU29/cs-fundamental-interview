@@ -4,26 +4,36 @@
 
 Chủ đề: Operating Systems · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Lớp phần mềm quản lý CPU, bộ nhớ, tiến trình và thiết bị. Ứng dụng gọi OS thay vì tự điều khiển phần cứng trực tiếp.
+
+**Nói đơn giản:** Mutex bảo vệ một vùng dữ liệu và có owner; semaphore là bộ đếm quyền, phù hợp để giới hạn số task dùng tài nguyên.
+
+**Từ khóa cần biết:** process = chương trình đang chạy; thread = luồng thực thi; kernel = phần lõi có quyền điều khiển máy.
+
+**Ví dụ dễ hình dung:** Mutex bảo vệ một cấu trúc; semaphore đếm số connection database còn trống để nhiều worker dùng đồng thời.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Mutex (mutual exclusion) là cơ chế khóa đảm bảo chỉ một luồng vào critical section tại một thời điểm, với quy tắc ownership: chỉ luồng đã `lock` mới được `unlock`. Semaphore là biến đếm (counting) không có ownership: bất kỳ luồng nào cũng có thể `post` (tăng) hoặc `wait` (giảm). Hai khái niệm này thường dùng thay thế nhau trong ví dụ đơn giản, nhưng khác nhau về ngữ nghĩa và pattern sử dụng.
-    10|
-Cùng với mutex và semaphore, spinlock là biến thể của mutex: thay vì ngủ khi không lấy được khóa, spinlock quay vòng (`while`) chờ. Spinlock phù hợp critical section cực ngắn (vài chục cycle CPU), mutex thường phù hợp critical section dài hơn vài chục microsecond.
+### Đọc nhanh trước khi đi sâu
 
-```mermaid
-flowchart LR
-    App["Application<br/>(multi-thread)"]
-    Sync["Sync primitive<br/>(mutex, semaphore, spinlock)"]
-    Ker["Kernel<br/>(scheduler, futex)"]
-    HW["Hardware<br/>(CAS, atomic)"]
-    App --> Sync --> Ker --> HW
-```
+**Ý chính:** Mutex bảo vệ một vùng dữ liệu và có owner; semaphore là bộ đếm quyền, phù hợp để giới hạn số task dùng tài nguyên.
 
-*Sơ đồ vị trí: application gọi sync primitive; kernel thực hiện qua scheduler (futex, syscall) hoặc hardware atomic (CAS). Mutex ngủ trên syscall; spinlock busy-wait trên CAS.*
+**Ví dụ interview:** Mutex bảo vệ một cấu trúc; semaphore đếm số connection database còn trống để nhiều worker dùng đồng thời.
 
-### Trả lời 30 giây
+**Luồng 4 bước:**
 
-"Mutex là khóa có ownership — chỉ thread đã lock mới được unlock. Thường count=1 (binary mutex). Semaphore là biến đếm không có ownership — bất kỳ thread nào cũng có thể post/wait. Counting semaphore có thể đếm > 1, binary semaphore gần giống mutex nhưng thiếu ownership. Mutex dùng cho mutual exclusion (critical section); semaphore dùng cho signaling (producer-consumer, resource pool). Spinlock là biến thể của mutex: busy-wait thay vì sleep — nhanh cho critical section cực ngắn (< 50 cycle), tốn CPU cho critical section dài. Trong code ứng dụng (Java, C#) gần như chỉ dùng mutex; semaphore chỉ cần cho producer-consumer hoặc resource pool. Linux kernel dùng spinlock cho interrupt context ngắn, mutex cho code có thể ngủ."
+1. Thread muốn vào vùng dữ liệu chung hoặc lấy một slot tài nguyên.
+2. Mutex cho một owner vào; semaphore giảm counter nếu còn slot.
+3. Nếu không được cấp, thread ngủ hoặc spin tùy primitive.
+4. Khi owner nhả mutex hoặc counter tăng, một thread chờ được đánh thức.
+
+**Nói như trong interview:** Mutex bảo vệ một vùng dữ liệu và có owner; semaphore là bộ đếm quyền, phù hợp để giới hạn số task dùng tài nguyên. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Mutex với ownership**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

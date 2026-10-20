@@ -1,173 +1,131 @@
 # What happens when you type google.com in a browser?
 
-> Gõ một dòng text trong thanh địa chỉ rồi nhấn Enter kích hoạt hàng chục bước qua nhiều tầng: parse URL, HSTS, DNS nhiều tầng, ARP, TCP handshake, TLS handshake, HTTP request, CDN edge, response, parse HTML, tải subresource và paint. Bài này đi qua từng bước theo thứ tự thời gian, tập trung vào câu hỏi phỏng vấn.
+> Bài này trả lời theo đúng thứ tự thời gian: trình duyệt hiểu địa chỉ, tìm IP, mở kết nối, xác thực HTTPS, gửi HTTP request, nhận dữ liệu và vẽ trang. Mỗi bước có một giải thích ngắn trước khi đi vào từ khóa interview.
 
 Chủ đề: Networking · Ngày: 2026-10-15
 
-Giả định: Mô tả trải nghiệm mặc định trên Chrome 2026, mạng IPv4, server google.com đang phục vụ bình thường. Redirect google.com → www.google.com là phổ biến nhưng **phụ thuộc deployment** — triển khai khác nhau có thể trả thẳng 200 từ google.com. Các công cụ/thư viện được ghi tên chính xác: BoringSSL (Chrome), glibc `getaddrinfo`, mDNSResponder (macOS), Wireshark, tcpdump, curl.
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Browser là ứng dụng ở phía client. Google là server ở phía bên kia Internet. Giữa hai bên có DNS, router, TCP hoặc QUIC, TLS và HTTP.
+
+**Nói đơn giản:** Tên `google.com` chỉ dễ nhớ với người. Máy phải đổi tên đó thành IP, mở một kênh liên lạc an toàn, gửi request, nhận HTML rồi biến HTML thành pixel trên màn hình.
+
+**Từ khóa cần biết:** `DNS` = dịch tên miền thành IP; `TLS` = mã hóa và xác thực kết nối; `HTTP` = quy tắc request/response giữa browser và server.
+
+**Ví dụ dễ hình dung:** Với trang đặt hàng, browser cũng làm gần như vậy: tìm IP của API, mở HTTPS, gửi `GET /orders`, nhận JSON rồi hiển thị danh sách đơn.
+
+**Cách học bài này:** Nhớ 8 bước ở phần 1 trước. Khi interviewer chọn một bước để đào sâu, dùng phần 2 và các câu hỏi ở phần 3 để trả lời.
 
 ## 1. Là gì
 
-### Định nghĩa
+### Đọc nhanh trước khi đi sâu
 
-Khi người dùng gõ `google.com` và nhấn Enter, trình duyệt không "gọi HTTP" mà chạy một chuỗi xác định qua nhiều tầng: phân tích URL, kiểm tra HSTS preload, phân giải DNS (cache trình duyệt → OS → resolver → authoritative), ánh xạ IP sang MAC qua ARP, mở kết nối TCP, bắt tay TLS, gửi request HTTP, CDN edge xử lý, nhận response, parse HTML, tải subresource song song, và render pixel. Chuỗi này tốn 5–15 bước mạng, mỗi bước có thể miss cache và tăng latency đáng kể.
+**Ý chính:** Một lần gõ URL đi qua parse, DNS, kết nối TCP hoặc QUIC, TLS, HTTP, server, trình duyệt và nhiều lớp cache.
 
-### Vị trí trong hệ thống
+**Ví dụ interview:** Browser tra DNS, tìm route, mở connection, tải HTML rồi tiếp tục tải CSS, JavaScript và ảnh.
 
-```mermaid
-flowchart TD
-    BR["Trình duyệt<br/>omnibox, HSTS preload, host cache, connection pool"] --> OSR["OS resolver<br/>getaddrinfo, mDNSResponder"]
-    OSR --> RR["Recursive resolver<br/>8.8.8.8, 1.1.1.1"]
-    RR --> AUTH["root → TLD → authoritative"]
-    BR --> KRN["Kernel network stack<br/>TCP, ARP/NDP, route table"]
-    KRN --> TLS["TLS userland<br/>BoringSSL (Chrome), NSS (Firefox)"]
-    KRN --> NIC["NIC / driver<br/>Ethernet hoặc Wi-Fi"]
-    NIC --> GFE["CDN edge<br/>terminate TLS, trả HTML/redirect"]
-```
+**Luồng 4 bước:**
 
-*Sơ đồ: Trình duyệt chịu trách nhiệm URL → host, OS chịu đưa byte ra card mạng, resolver chịu ánh xạ tên → IP, CDN chịu phục vụ gần người dùng.*
+1. Browser parse `google.com`, chọn HTTPS và kiểm tra HSTS/cache.
+2. DNS đổi tên miền thành IP; OS chọn route và tìm MAC của gateway nếu cần.
+3. Browser mở TCP + TLS, hoặc QUIC nếu dùng HTTP/3, rồi gửi HTTP GET.
+4. Google trả HTML; browser parse DOM/CSS, tải resource, layout và vẽ pixel.
 
-### Trả lời 30 giây
-
-Gõ `google.com` + Enter, trình duyệt parse URL rồi kiểm tra HSTS preload list — nếu có thì tự nâng HTTP thành HTTPS nội bộ. Sau đó tra DNS qua nhiều tầng cache (browser <1ms, OS vài ms, resolver 10–50ms nếu miss). Khi có IP, kernel cần MAC gateway qua ARP nếu chưa có. Mở TCP (1 RTT ~30–100ms), bắt tay TLS 1.3 (1 RTT nữa). Gửi HTTP/2 GET, CDN edge xử lý, trả HTML hoặc redirect. Preload scanner parse HTML trong khi đang nhận byte để fetch subresource sớm. Toàn bộ từ Enter tới First Contentful Paint trên mạng tốt thường dưới 500ms nếu cache ấm.
+**Nói như trong interview:** Một lần gõ URL đi qua parse, DNS, kết nối TCP hoặc QUIC, TLS, HTTP, server, trình duyệt và nhiều lớp cache. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Luồng thời gian**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 
-### Tám bước theo thứ tự thời gian
-
-Mỗi bước gắn với một tầng và chi phí bậc độ lớn (~50ms RTT, cache lạnh):
+### Luồng thời gian
 
 ```mermaid
 sequenceDiagram
-    autonumber
-    participant U as Người dùng
-    participant BR as Trình duyệt
-    participant HST as HSTS preload
-    participant DC as Browser DNS cache
-    participant OS as OS resolver
-    participant RR as Recursive resolver
-    participant AR as ARP cache
-    participant TC as TCP kernel
-    participant TL as TLS userland
-    participant CD as CDN edge (GFE)
-
-    U->>BR: Enter "google.com"
-    BR->>HST: google.com trong HSTS preload?
-    HST-->>BR: có, scheme = https
-    BR->>DC: getaddrinfo("google.com")
-    DC-->>BR: miss → chuyển OS
-    OS->>RR: query A google.com (UDP/53)
-    RR-->>OS: IP (Anycast, 142.250.x.x)
-    OS-->>BR: IP
-    BR->>AR: MAC của default gateway?
-    AR-->>BR: có (hoặc gửi ARP request)
-    BR->>TC: connect(IP, 443, SNI=google.com)
-    TC->>CD: SYN
-    CD-->>TC: SYN-ACK
-    TC-->>CD: ACK (TCP done)
-    Note over TC,CD: +1 RTT TCP
-    BR->>TL: TLS 1.3 ClientHello + key_share
-    TL->>CD: ServerHello + EncryptedExtensions + Cert + Finished
-    CD-->>TL: Finished
-    Note over BR,CD: +1 RTT TLS
-    BR->>CD: HTTP/2 GET / (encrypted)
-    alt deployment trả 301
-        CD-->>BR: 301 → https://www.google.com/
-    else deployment trả thẳng
-        CD-->>BR: 200 OK + HTML gzipped
-    end
+    participant B as Browser
+    participant R as DNS resolver
+    participant S as Google edge
+    participant A as Application
+    B->>B: Parse URL, kiểm tra HSTS và cache
+    B->>R: Query A/AAAA nếu DNS cache miss
+    R-->>B: IP của google.com
+    B->>S: TCP handshake hoặc QUIC handshake
+    B->>S: TLS ClientHello + SNI + key share
+    S-->>B: Certificate + server key share + Finished
+    B->>S: HTTP GET /
+    S->>A: Chuyển request tới backend phù hợp
+    A-->>S: HTML/redirect + headers
+    S-->>B: HTTP response
+    B->>B: Parse, tải resource, layout, paint
 ```
 
-*Sơ đồ tuần tự từ Enter tới response đầu tiên. Redirect google.com → www.google.com là deployment-dependent, không phải hành vi bắt buộc.*
+*Sơ đồ tuần tự: DNS, kết nối, TLS, HTTP và rendering xảy ra theo chuỗi; các resource phụ có thể tải song song sau khi browser thấy chúng.*
 
-**1. Parse URL (<1 ms).** Tách scheme (`https://`), host (`google.com`), path (`/`), query. Nếu không có dấu chấm, chuyển sang search engine mặc định. Chrome thêm `https://` ưu tiên.
+### Bước 1 — Browser hiểu điều người dùng gõ
 
-**2. HSTS preload lookup (<1 ms).** Chrome chứa danh sách hàng trăm nghìn host từ `hstspreload.org` trong mã nguồn. `google.com` và `www.google.com` có trong danh sách. Nếu có, HTTP tự chuyển thành HTTPS nội bộ trước khi gửi byte nào.
+Browser phải phân biệt đây là URL hay từ khóa tìm kiếm. Với `google.com`, nó tạo host `google.com` và path `/`; scheme thường được nâng lên `https` theo chính sách của browser, HSTS và redirect của site.
 
-**3. DNS resolution (0 – 200 ms).** Browser hỏi cache riêng (Chrome host cache, vài phút). Miss → gọi `getaddrinfo` của OS. OS hỏi cache của mình (Windows DNS Client, Linux nss, macOS mDNSResponder). Miss → gửi UDP/53 tới recursive resolver. Resolver hỏi root → TLD → authoritative. `google.com` có TTL 300s vì Anycast.
+HSTS preload là danh sách host mà browser biết trước là chỉ được dùng HTTPS. HSTS giúp tránh request HTTP đầu tiên bị kẻ đứng giữa đổi hướng, nhưng không thay thế việc server cấu hình certificate đúng.
 
-**4. ARP cho gateway (<1 ms trong LAN).** Khi có IP đích, kernel cần MAC của default gateway. Nếu ARP cache chưa có, gửi ARP request (IPv4) hoặc Neighbor Solicitation (IPv6) trên LAN.
+### Bước 2 — DNS đổi tên thành địa chỉ IP
 
-**5. TCP 3-way handshake (1 RTT, ~30–100 ms).** Client gửi SYN, server gửi SYN-ACK, client gửi ACK. Ba packet, một RTT. Google không bật TCP Fast Open ở front-end.
+Browser có thể tìm thấy IP trong host cache. Nếu không có, nó gọi resolver của OS; OS kiểm tra cache và file `hosts`, rồi gửi query tới recursive resolver (ISP, công ty hoặc public resolver như `1.1.1.1`).
 
-**6. TLS 1.3 handshake (1 RTT, ~30–100 ms).** Client gửi ClientHello kèm `key_share` (X25519 hoặc secp256r1). Server phản hồi ServerHello, EncryptedExtensions, Certificate, CertificateVerify, Finished — tất cả trong 1 RTT. Sau đó có thể gửi HTTP request ngay. 0-RTT khả thi nếu client có session ticket hoặc PSK.
+Nếu recursive resolver cũng cache miss, nó hỏi theo cây DNS: root chỉ tới TLD `.com`, TLD chỉ tới authoritative server của `google.com`, authoritative trả A (IPv4) hoặc AAAA (IPv6). Resolver cache kết quả theo TTL rồi trả IP cho browser.
 
-**7. HTTP request (1 RTT).** Client gửi `GET /` qua HTTP/2 stream. Header gồm `:method`, `:path`, `:scheme`, `:authority`, `user-agent`, `cookie` nếu có. Nhờ HTTP/2 multiplexing, nhiều request tới cùng host đi trên một kết nối TCP.
+**Điểm interview:** không phải mọi request đều đi root → TLD → authoritative. Đó là đường khi các cache đều miss; cache hit thường chỉ tốn một lần hỏi resolver hoặc không tốn network round-trip nào.
 
-**8. CDN edge xử lý và response (1–50 ms).** Request tới Google Front End (GFE). GFE terminate TLS, chuyển tới backend gần nhất, trả HTML 30–50 KB gzip. Triển khai phổ biến: trả `301` sang `https://www.google.com/` (redirect deployment-dependent). Một số triển khai trả thẳng `200 OK` từ `google.com`.
+### Bước 3 — OS chọn đường ra mạng
 
-### Sơ đồ trạng thái và đường lỗi
+OS dùng routing table để chọn interface và next hop. Nếu server ở ngoài LAN, frame đầu tiên đi tới default gateway, không đi thẳng tới MAC của Google.
 
-```mermaid
-stateDiagram-v2
-    [*] --> ParseURL
-    ParseURL --> DNSLookup
-    DNSLookup --> CacheHit
-    DNSLookup --> RecursiveQuery
-    RecursiveQuery --> CacheHit
-    CacheHit --> TCPConnect
-    TCPConnect --> TLSHandshake
-    TLSHandshake --> HTTPRequest
-    HTTPRequest --> Response200
-    HTTPRequest --> Response301
-    Response301 --> DNSLookup
-    Response200 --> ParseHTML
-    ParseHTML --> SubresourceFetch
-    SubresourceFetch --> Render
-    Render --> [*]
-    TCPConnect --> ConnectFail
-    TLSHandshake --> CertError
-    DNSLookup --> NXDOMAIN
-    ConnectFail --> [*]
-    CertError --> [*]
-    NXDOMAIN --> [*]
-```
+Nếu chưa biết MAC của gateway, IPv4 dùng ARP; IPv6 dùng Neighbor Discovery (NDP). Đây là bước trong mạng nội bộ, khác với DNS: ARP tìm **MAC của next hop**, còn DNS tìm **IP của host**.
 
-*Ba trạng thái kết thúc sớm: ConnectFail (SYN timeout hoặc firewall), CertError (chứng chỉ sai/hết hạn), NXDOMAIN (DNS không tìm thấy).*
+### Bước 4 — Mở kênh vận chuyển
 
-### Bảng con số bậc độ lớn
+Với HTTP/1.1 hoặc HTTP/2, browser mở TCP bằng SYN → SYN-ACK → ACK, tốn một RTT. Với HTTP/3, QUIC chạy trên UDP nhưng tự cung cấp reliability, congestion control và nhiều stream; nó gộp transport handshake với TLS để giảm số RTT.
 
-| Thao tác | Thời gian | Ghi chú |
-|---|---|---|
-| Tra DNS cache (browser/OS) | <1 ms | hash map trong RAM |
-| DNS recursive query | 10–200 ms | 1–3 RTT tuỳ cache resolver |
-| ARP lookup | <1 ms | trong LAN |
-| TCP 3-way handshake | 1 RTT | 30–100 ms tuỳ vị trí |
-| TLS 1.3 handshake | 1 RTT | 30–100 ms, có thể 0-RTT |
-| HTTP/2 GET | 1 RTT | sau TLS, tuỳ body size |
-| TTFB từ CDN edge | 1–50 ms | cache hit gần nhất |
-| Preload scanner | +1–2 ms | chạy song song HTML parse |
+QUIC không phải lúc nào cũng nhanh hơn. 0-RTT chỉ dùng được khi browser có thông tin phiên trước đó và request an toàn để replay; mạng chặn UDP có thể khiến browser quay về HTTP/2.
 
-### Ví dụ chạy từng bước
+### Bước 5 — TLS bảo vệ kết nối
 
-Kịch bản: Chrome 2026 trên laptop vừa khởi động (cache lạnh), gõ `https://google.com`, RTT user → Google PoP nearest ~50 ms. Mục tiêu: thấy latency từng bước cộng lại đúng bằng script, và thấy cache warm tiết kiệm bao nhiêu RTT.
+Browser gửi ClientHello, trong đó có phiên bản TLS, cipher suites, SNI (`google.com`), ALPN (`h2` hoặc `h3`) và key share. Server chọn tham số, gửi certificate chain, chữ ký `CertificateVerify` và `Finished`.
 
-**Bước 1 (t+0 ms, parse URL).** Tách scheme `https`, host `google.com`. Chrome thêm `https://` ưu tiên. < 1 ms.
+Browser kiểm tra hostname, thời hạn và chữ ký certificate tới một Root CA được tin cậy. Hai bên dùng ECDHE để tạo session key; sau handshake, headers, cookie và body HTTP được mã hóa. TLS xác thực server và bảo vệ dữ liệu trên đường truyền, nhưng không tự đăng nhập user.
 
-**Bước 2 (t+1 ms, HSTS).** Tra preload list: `google.com` có → scheme giữ `https`. Thiếu thì browser phải thử `http://` trước, MITM ở request đầu. < 1 ms.
+### Bước 6 — Browser gửi HTTP request
 
-**Bước 3 (t+100 ms, DNS cold).** Browser host cache miss (vừa khởi động). `getaddrinfo` → OS cache miss → UDP/53 tới 8.8.8.8. Resolver miss → authoritative `google.com` (TTL 300s, Anycast). DNS cold ≈ 100 ms. Đã tính lại bằng script với min 50, max 200, mid 100.
+Request thường có method `GET`, path `/`, authority/host, `User-Agent`, `Accept`, `Accept-Encoding` và cookie phù hợp. HTTP/2 và HTTP/3 truyền các trường này trong binary frames/pseudo-headers; không nên nói request line trên dây luôn là text `GET / HTTP/2`.
 
-**Bước 4 (t+100 ms, ARP).** Kernel đã có MAC default gateway. < 1 ms.
+Browser có thể dùng connection pool, nên request tiếp theo không cần lặp lại TCP và TLS. Redirect `301` sang host khác là một response hợp lệ nhưng có thể buộc browser thực hiện thêm DNS/kết nối/TLS.
 
-| Bước | Cold (cache lạnh) | Warm (cache ấm) | Vì sao |
-|---|---|---|---|
-| Parse URL + HSTS | < 1 ms | < 1 ms | hash map trong RAM |
-| DNS resolution | 100 ms | < 1 ms | cache miss ở 4 tầng vs hit |
-| ARP | < 1 ms | < 1 ms | cache đã có |
-| TCP + TLS 1.3 | 100 ms (2 RTT) | 0 ms (session ticket) | full vs reuse |
-| HTTP/2 GET + TTFB | 80 ms | 80 ms | luôn 1 RTT sau TLS |
-| Tổng | ~281 ms | ~82 ms | (đã tính lại bằng script) |
+### Bước 7 — Edge và backend xử lý request
 
-**Bước 5 (t+150 ms, TCP).** `connect(142.250.x.x, 443, SNI=google.com)` → SYN → SYN-ACK → ACK. 1 RTT = 50 ms.
+Request tới edge hoặc reverse proxy của Google. Hạ tầng có thể làm TLS termination, chống abuse, chọn backend, kiểm tra cache và trả response. Tên thành phần cụ thể như GFE, Maglev hay cấu trúc backend là chi tiết implementation; trong interview chỉ nêu khi interviewer hỏi về hạ tầng Google.
 
-**Bước 6 (t+200 ms, TLS 1.3).** `ClientHello` kèm `key_share` X25519, SNI `google.com`, ALPN `h2`. Server trả 4 message mã hóa trong 1 flight. Client verify chain (root trong trust store), gửi `Finished`. 1 RTT = 50 ms.
+Response có status như `200` hoặc `301`, headers như `Content-Type`, `Content-Encoding`, `Cache-Control`, `Strict-Transport-Security`, rồi body HTML. Không nên khẳng định luôn là `200`: behavior `google.com` → `www.google.com` phụ thuộc deployment và thời điểm.
 
-**Bước 7 (t+280 ms, HTTP + response).** GFE terminate TLS, trả `200 OK` + HTML 30-50 KB gzip. TTFB ~30 ms. Tổng cold ≈ 281 ms. Reload trang vài phút sau: DNS hit browser cache, connection pool reuse + TLS 0-RTT → chỉ còn 1 RTT HTTP + 30 ms server = ~82 ms.
+### Bước 8 — Browser biến response thành pixel
 
-**Biến thể "nếu lỗi".** Nếu deployment google.com trả `301 → https://www.google.com/` (deployment-dependent), phải lặp lại DNS + TCP + TLS cho domain mới — cộng thêm ~200 ms cold. Một số triển khai trả thẳng `200 OK` từ `google.com` để tránh điều này. Wi-Fi roam giữa request: TCP socket bị huỷ trên HTTP/1.1, HTTP/2; HTTP/3 QUIC dùng connection ID nên sống tiếp.
+Browser nhận byte và parse HTML thành DOM. Preload scanner có thể phát hiện CSS, JavaScript, font và image để tải song song. CSSOM được tạo từ CSS; DOM + CSSOM tạo render tree.
 
-Điều rút ra: 90% latency cold đến từ ba RTT nối tiếp (DNS lạnh + TCP + TLS), và mỗi RTT tiếp theo mở một cache tier có thể loại bỏ hoàn toàn RTT đó. Nối với câu hỏi [câu 1 trong phần 3A](type-google-com-in-browser.md#câu-1): cache ấm giảm DNS về 0 ms và TLS về 0-RTT, nên bước chiếm nhiều nhất lúc đó chỉ còn 1 RTT HTTP.
+Sau đó browser tính kích thước/vị trí (**layout**), rasterize chữ và hình (**paint**), rồi ghép các layer (**composite**, thường có GPU hỗ trợ). JavaScript không có `async`/`defer` có thể chặn HTML parser; CSS có thể chặn lần render đầu để tránh vẽ trang chưa có style.
+
+### Con số cần nói có điều kiện
+
+| Đoạn | Bậc độ lớn | Điều kiện |
+|---|---:|---|
+| Browser/OS cache | dưới 1 ms đến vài ms | cache hit trong RAM |
+| DNS khi resolver cache miss | khoảng 10–200 ms | phụ thuộc RTT và số cache miss |
+| TCP handshake | 1 RTT | connection mới |
+| TLS 1.3 | khoảng 1 RTT sau TCP | full handshake, không reuse |
+| HTTP response | vài ms đến hàng trăm ms | edge hit hay phải đi origin |
+| Render | phụ thuộc HTML/CSS/JS | thiết bị và kích thước trang |
+
+Đây là các bậc độ lớn để giải thích trade-off, không phải SLA cố định của Google. Muốn biết nguyên nhân thật phải đo bằng DevTools waterfall, `curl -w`, browser performance panel hoặc tracing.
+
+### Cách debug khi trang không tải
+
+1. `dig google.com` — kiểm tra DNS có trả A/AAAA hay không.
+2. `curl -sS -o /dev/null -w 'dns:%{time_namelookup} connect:%{time_connect} tls:%{time_appconnect} ttfb:%{time_starttransfer} total:%{time_total}\n' https://google.com` — tách thời gian DNS, connect, TLS và byte đầu tiên.
+3. DevTools Network — xem redirect, status, TTFB, resource bị block và lỗi certificate; chỉ dùng `tcpdump`/`openssl s_client` khi cần xuống tầng packet/TLS.
 
 ## 3. Câu hỏi phỏng vấn
 

@@ -4,27 +4,36 @@
 
 Chủ đề: Networking · Ngày: 2026-10-15
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Cách trình duyệt, ứng dụng và máy chủ gửi dữ liệu cho nhau. Mỗi bước có giao thức, độ trễ và kiểu lỗi riêng.
+
+**Nói đơn giản:** TCP bắt tay bằng SYN, SYN-ACK, ACK để hai phía biết kết nối tồn tại và đồng bộ số thứ tự trước khi gửi byte dữ liệu.
+
+**Từ khóa cần biết:** client = bên gửi request; server = bên phục vụ; packet = mảnh dữ liệu đi qua mạng.
+
+**Ví dụ dễ hình dung:** Client gửi SYN, server trả SYN-ACK, client ACK rồi mới gửi request HTTP qua connection đã mở.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-TCP three-way handshake là quy trình ba gói tin đầu tiên để mở một kết nối TCP: client gửi SYN với sequence number khởi tạo (ISN_C), server phản hồi SYN-ACK với ISN của mình và ACK = ISN_C + 1, client gửi ACK = ISN_S + 1. Sau ba bước cả hai phía đã đồng bộ ISN, biết nhau đang sẵn sàng nhận data, và chuyển sang trạng thái ESTABLISHED.
+### Đọc nhanh trước khi đi sâu
 
-Cần ba bước vì hai bước không đủ đảm bảo: với hai gói, server không biết client có nhận được SYN-ACK hay chưa, và segment SYN cũ (bị trễ hoặc nhân bản) có thể mở một kết nối ma. ACK thứ ba đóng vai trò xác nhận hai chiều.
+**Ý chính:** TCP bắt tay bằng SYN, SYN-ACK, ACK để hai phía biết kết nối tồn tại và đồng bộ số thứ tự trước khi gửi byte dữ liệu.
 
-```mermaid
-flowchart LR
-    App["Application<br/>(HTTP client, DB driver,<br/>RPC framework)"]
-    Sock["Socket API<br/>(connect, accept,<br/>send, recv)"]
-    Tcp["TCP<br/>3-way handshake<br/>seq · ack · retransmit"]
-    Ip["IP<br/>(routing, MTU,<br/>fragmentation)"]
-    Nic["NIC / driver<br/>(ring buffer, GRO, RSS)"]
-    App --> Sock --> Tcp --> Ip --> Nic
-```
+**Ví dụ interview:** Client gửi SYN, server trả SYN-ACK, client ACK rồi mới gửi request HTTP qua connection đã mở.
 
-*Sơ đồ vị trí: Application gọi Socket API, Socket API chuyển cho TCP, TCP nằm trên IP, IP đi qua NIC. Lỗi handshake có thể nằm ở bất kỳ tầng nào.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Ứng dụng tạo request với tên host, port và dữ liệu.
+2. OS và các giao thức mạng tìm đường rồi chuyển packet tới server.
+3. Server xử lý request và trả response qua kết nối phù hợp.
+4. Client kiểm tra response, cache hoặc render dữ liệu cho người dùng.
 
-"Client gửi SYN với ISN ngẫu nhiên, server phản hồi SYN-ACK với ISN riêng và ACK = ISN_client + 1, client gửi ACK = ISN_server + 1. Cả hai phía chuyển sang ESTABLISHED sau ba bước. ISN phải ngẫu nhiên để chống spoofing segment từ connection cũ (RFC 1948). Client gửi được data đầu tiên sau 1 RTT; ACK cuối có thể mang payload (slow start bắt đầu ngay). Hai bước là không đủ vì server không biết client đã nhận SYN-ACK và không phân biệt được SYN cũ bị trễ."
+**Nói như trong interview:** TCP bắt tay bằng SYN, SYN-ACK, ACK để hai phía biết kết nối tồn tại và đồng bộ số thứ tự trước khi gửi byte dữ liệu. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. SYN: client chọn ISN và gửi**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

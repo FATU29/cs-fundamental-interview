@@ -4,30 +4,36 @@
 
 Chủ đề: Database · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nơi ứng dụng lưu dữ liệu và đọc lại dữ liệu. Khó ở chỗ dữ liệu phải đúng khi nhiều người cùng đọc, ghi, hoặc khi máy bị lỗi.
+
+**Nói đơn giản:** Replication sao chép dữ liệu sang nhiều database để chịu lỗi và phục vụ nhiều lượt đọc hơn.
+
+**Từ khóa cần biết:** row = một dòng dữ liệu; query = câu hỏi gửi database; transaction = một nhóm thay đổi được xử lý cùng nhau.
+
+**Ví dụ dễ hình dung:** Primary nhận lệnh ghi và replica phục vụ đọc; nếu replica trễ, người dùng vừa đặt hàng có thể chưa thấy đơn ngay.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Database replication là quá trình tự động sao chép và đồng bộ dữ liệu từ một database (gọi là **primary**, hay master) sang một hoặc nhiều database khác (gọi là **replica**, hay standby), sao cho các replica giữ bản sao gần đây của cùng một dữ liệu. Mục tiêu: chịu lỗi (high availability), tăng tải đọc (scale read), phục vụ phân tích (analytics offload), và tạo bản backup "live" để point-in-time recovery.
+### Đọc nhanh trước khi đi sâu
 
-Có ba trục để phân loại replication: (1) đồng bộ (synchronous) vs bất đồng bộ (asynchronous), (2) replication dựa trên statement (statement-based) hay row-based (row-based) hay logical, (3) topology: single-primary hay multi-primary. Cách chọn ảnh hưởng trực tiếp RPO (Recovery Point Objective — mất bao nhiêu dữ liệu khi sự cố), latency ghi, và độ phức tạp vận hành.
+**Ý chính:** Replication sao chép dữ liệu sang nhiều database để chịu lỗi và phục vụ nhiều lượt đọc hơn.
 
-```mermaid
-flowchart LR
-    App["Application<br/>(read/write)"]
-    P["Primary<br/>(ghi WAL<br/>khi COMMIT)"]
-    R1["Replica 1<br/>(streaming)"]
-    R2["Replica 2<br/>(read-only /<br/>analytics)"]
-    App -->|INSERT<br/>UPDATE| P
-    P -->|WAL stream| R1
-    P -->|WAL stream| R2
-    App -.read-only.-> R1
-    App -.read-only.-> R2
-```
+**Ví dụ interview:** Primary nhận lệnh ghi và replica phục vụ đọc; nếu replica trễ, người dùng vừa đặt hàng có thể chưa thấy đơn ngay.
 
-*Sơ đồ vị trí: Application ghi vào Primary; Primary ghi WAL, sau đó stream (binary log / WAL) cho replica. Replica replay. Application có thể đọc từ replica để giảm tải Primary.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Primary nhận write và tạo log thay đổi.
+2. Replica đọc log rồi áp dụng lại thay đổi.
+3. Read traffic có thể chuyển tới replica nhưng phải tính replication lag.
+4. Khi primary lỗi, hệ thống chọn replica đủ mới để failover.
 
-"Database replication là sao chép dữ liệu từ primary sang replica. Primary ghi WAL/binary log mỗi commit; replica kết nối và replay, thường qua streaming protocol (PostgreSQL `wal_receiver`, MySQL binlog relay). Hai chế độ chính: asynchronous (replica lag ~ms tới vài giây, primary commit nhanh, RPO có thể vài giây nếu primary chết đột ngột) và synchronous (replica xác nhận đã ghi WAL trước khi primary COMMIT trả OK, RPO=0 nhưng latency tăng 1 RTT). Topology phổ biến: single-primary với N replica (PostgreSQL, MySQL InnoDB), multi-primary với conflict resolution (MySQL Group Replication, Galera, Cassandra). Replication phục vụ HA, scale read và analytics offload."
+**Nói như trong interview:** Replication sao chép dữ liệu sang nhiều database để chịu lỗi và phục vụ nhiều lượt đọc hơn. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Primary và replica — ai sửa, ai đọc**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

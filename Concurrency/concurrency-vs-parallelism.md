@@ -4,32 +4,36 @@
 
 Chủ đề: Concurrency · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nhiều việc cùng chạy trong một chương trình. Khó ở chỗ các việc có thể chạm cùng dữ liệu và làm kết quả sai nếu không phối hợp.
+
+**Nói đơn giản:** Concurrency là quản lý nhiều việc trong cùng khoảng thời gian; parallelism là thật sự chạy nhiều việc cùng lúc trên nhiều lõi CPU.
+
+**Từ khóa cần biết:** thread = luồng chạy; shared state = dữ liệu dùng chung; synchronization = cách phối hợp luồng.
+
+**Ví dụ dễ hình dung:** Một server nhận request và xen kẽ xử lý chúng là concurrency; hai lõi xử lý hai request thật sự cùng lúc là parallelism.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Concurrency là cấu trúc của chương trình: các tác vụ (task) được tổ chức để có thể tiến triển theo thứ tự chồng chéo, không nhất thiết chạy cùng lúc. Một web server xử lý nhiều request trên một thread là concurrency (chuyển context khi request chờ I/O). Parallelism là sự thực thi: hai hay nhiều tác vụ chạy đúng cùng một thời điểm trên hai hay nhiều đơn vị xử lý (CPU core, GPU SM). Một vòng lặp xử lý ảnh chia trên 8 core là parallelism.
+### Đọc nhanh trước khi đi sâu
 
-Concurrency không cần nhiều core; parallelism cần. Một chương trình concurrent có thể chạy trên một core (qua context switch), một chương trình parallel cần ít nhất hai đơn vị thực thi thật. Multithreading là kỹ thuật hiện thực concurrency/parallelism bằng nhiều thread trong một process; multiprocessing hiện thực bằng nhiều process độc lập.
+**Ý chính:** Concurrency là quản lý nhiều việc trong cùng khoảng thời gian; parallelism là thật sự chạy nhiều việc cùng lúc trên nhiều lõi CPU.
 
-```mermaid
-flowchart LR
-    subgraph "Concurrency (1 core)"
-        T1["Task A<br/>chạy"]
-        T2["Task B<br/>chờ I/O"]
-        T3["Task A<br/>chạy tiếp"]
-        T1 --> T2 --> T3
-    end
-    subgraph "Parallelism (N core)"
-        P1["Task A<br/>core 1"]
-        P2["Task B<br/>core 2"]
-        P3["Task C<br/>core 3"]
-    end
-```
+**Ví dụ interview:** Một server nhận request và xen kẽ xử lý chúng là concurrency; hai lõi xử lý hai request thật sự cùng lúc là parallelism.
 
-*Sơ đồ vị trí: concurrency = xen kẽ (1 core đủ); parallelism = đồng thời thật (cần N core).*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Có nhiều task cùng chạy.
+2. Các task chạm vào dữ liệu hoặc tài nguyên chung.
+3. Chương trình dùng message passing, atomic hoặc lock để phối hợp.
+4. Task tiếp tục và kết quả không bị mất, trùng hoặc kẹt.
 
-"Concurrency là cấu trúc chương trình có thể xử lý nhiều việc chồng chéo; không cần nhiều core. Parallelism là thực thi nhiều việc đúng cùng lúc, cần nhiều CPU core. Ví dụ: một web server async xử lý 10.000 request trên 1 core là concurrency; xử lý 8 luồng video trên 8 core là parallelism. Multithreading tạo nhiều thread trong một process, chia sẻ heap, nhẹ nhưng cần đồng bộ (mutex, channel). Multiprocessing tạo nhiều process độc lập, memory riêng, nặng hơn nhưng không cần đồng bộ và tránh được GIL. Chọn thread cho I/O-bound, process cho CPU-bound, async cho I/O-bound ở scale rất lớn."
+**Nói như trong interview:** Concurrency là quản lý nhiều việc trong cùng khoảng thời gian; parallelism là thật sự chạy nhiều việc cùng lúc trên nhiều lõi CPU. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Concurrency qua context switch**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

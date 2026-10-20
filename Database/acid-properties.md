@@ -4,26 +4,36 @@
 
 Chủ đề: Database · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nơi ứng dụng lưu dữ liệu và đọc lại dữ liệu. Khó ở chỗ dữ liệu phải đúng khi nhiều người cùng đọc, ghi, hoặc khi máy bị lỗi.
+
+**Nói đơn giản:** ACID là bốn lời hứa của transaction: làm trọn vẹn, giữ dữ liệu hợp lệ, cô lập các giao dịch và không mất dữ liệu đã commit.
+
+**Từ khóa cần biết:** row = một dòng dữ liệu; query = câu hỏi gửi database; transaction = một nhóm thay đổi được xử lý cùng nhau.
+
+**Ví dụ dễ hình dung:** Chuyển tiền phải trừ A và cộng B cùng nhau; database không được giữ trạng thái chỉ trừ A sau khi máy crash.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-ACID là bốn tính chất mà một hệ RDBMS hứa cho mỗi transaction: Atomicity (A) — tất cả hoặc không; Consistency (C) — transaction chỉ đưa CSDL từ trạng thái hợp lệ sang trạng thái hợp lệ; Isolation (I) — các transaction song song không "thấy" trạng thái nửa vời của nhau theo mức isolation level đã chọn; Durability (D) — khi COMMIT trả OK, dữ liệu sống sót qua crash, restart, mất điện.
+### Đọc nhanh trước khi đi sâu
 
-ACID là kim chỉ nam cho thiết kế engine, không phải thuộc tính tự nhiên của mọi hệ thống: BASE (Basically Available, Soft state, Eventual consistency) là cách thay thế cho distributed store. Hầu hết RDBMS (PostgreSQL, MySQL InnoDB, Oracle, SQL Server) hứa ACID cho cụm single-instance; replication có thể phá D khi có lag hoặc failover.
+**Ý chính:** ACID là bốn lời hứa của transaction: làm trọn vẹn, giữ dữ liệu hợp lệ, cô lập các giao dịch và không mất dữ liệu đã commit.
 
-```mermaid
-flowchart LR
-    A["Atomicity<br/>(WAL + undo)"]
-    C["Consistency<br/>(constraints + rules)"]
-    I["Isolation<br/>(MVCC + locks)"]
-    D["Durability<br/>(WAL fsync)"]
-    A --> C --> I --> D
-```
+**Ví dụ interview:** Chuyển tiền phải trừ A và cộng B cùng nhau; database không được giữ trạng thái chỉ trừ A sau khi máy crash.
 
-*Sơ đồ vị trí: ACID là bốn trụ cột của một transaction; Atomicity cung cấp cơ chế, Consistency là hệ quả, Isolation đảm bảo cô lập, Durability đảm bảo bền.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Ứng dụng gửi query qua driver hoặc connection pool.
+2. Database engine tìm dữ liệu, kiểm tra constraint và xử lý transaction.
+3. Engine dùng index, lock/MVCC và log tùy loại thao tác.
+4. Kết quả được trả về; thay đổi chỉ bền vững sau COMMIT.
 
-"ACID là bốn tính chất của transaction RDBMS: Atomicity — tất cả hoặc không, đảm bảo bởi WAL và undo log; Consistency — transaction đi từ trạng thái hợp lệ sang trạng thái hợp lệ, dựa vào constraint (FK, unique, check) và logic nghiệp vụ; Isolation — các transaction song song thấy nhau theo level (READ COMMITTED mặc định PostgreSQL/Oracle/SQL Server, REPEATABLE READ mặc định InnoDB), dùng MVCC hoặc lock; Durability — sau COMMIT, dữ liệu sống sót qua crash nhờ WAL fsync. ACID áp dụng cho single-instance; replication đồng bộ giữ D ở mức cụm, async thì có thể mất vài giây."
+**Nói như trong interview:** ACID là bốn lời hứa của transaction: làm trọn vẹn, giữ dữ liệu hợp lệ, cô lập các giao dịch và không mất dữ liệu đã commit. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Atomicity: tất cả hoặc không**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

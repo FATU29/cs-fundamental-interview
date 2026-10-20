@@ -4,25 +4,36 @@
 
 Chủ đề: Operating Systems · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Lớp phần mềm quản lý CPU, bộ nhớ, tiến trình và thiết bị. Ứng dụng gọi OS thay vì tự điều khiển phần cứng trực tiếp.
+
+**Nói đơn giản:** System call là cổng để code user yêu cầu kernel làm việc đặc quyền như đọc file hoặc tạo process.
+
+**Từ khóa cần biết:** process = chương trình đang chạy; thread = luồng thực thi; kernel = phần lõi có quyền điều khiển máy.
+
+**Ví dụ dễ hình dung:** read() chuyển từ user mode vào kernel để kiểm tra quyền và lấy byte từ file descriptor.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-System call (syscall) là giao diện lập trình giữa user mode và kernel. Mỗi syscall là một yêu cầu có số hiệu (`syscall number`) mà CPU chuyển vào kernel qua trap. Kernel kiểm tra tham số, thực thi quyền hạn (process có được mở file đó, có được bind cổng đó không), rồi trả kết quả hoặc mã lỗi.
+### Đọc nhanh trước khi đi sâu
 
-User mode (ring 3 trên x86-64, EL0 trên AArch64) chạy code ứng dụng, không có quyền truy cập thẳng phần cứng hay cấu trúc kernel. Kernel mode (ring 0, EL1) chạy kernel, có đặc quyền đầy đủ. Chuyển đổi hai mode tốn vài chục đến vài trăm nanosecond, lưu user context và nạp kernel context. Trên Linux x86-64 lệnh là `syscall`, trên AArch64 là `svc #0`. macOS dùng BSD syscall layer phía trên Mach trap.
+**Ý chính:** System call là cổng để code user yêu cầu kernel làm việc đặc quyền như đọc file hoặc tạo process.
 
-```mermaid
-flowchart LR
-    A["User process<br/>(ring 3)"] -->|"glibc wrapper<br/>read()"| B["libc / runtime<br/>(user mode)"]
-    B -->|"syscall instruction"| K["Kernel<br/>(ring 0)"]
-    K -->|"driver / VFS / scheduler"| H["Hardware<br/>(disk, NIC, timer)"]
-    K -->|"return value / errno"| A
-```
+**Ví dụ interview:** read() chuyển từ user mode vào kernel để kiểm tra quyền và lấy byte từ file descriptor.
 
-*Sơ đồ vị trí: user process gọi libc wrapper, libc đặt tham số vào thanh ghi rồi trap vào kernel; kernel xử lý rồi trả về cùng mã lỗi hoặc kết quả. Mỗi syscall là một lần trap.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Code user gọi wrapper như read(), open() hoặc fork().
+2. CPU đổi từ user mode sang kernel mode qua trap/syscall instruction.
+3. Kernel kiểm tra pointer, quyền và thực hiện thao tác với tài nguyên.
+4. Kernel ghi kết quả hoặc error code rồi trả CPU về user mode.
 
-"System call là cơ chế user mode gọi kernel. Ví dụ `read(fd, buf, n)` trong libc đặt `rax = 0` (SYS_read) rồi CPU chạy `syscall` instruction, lưu RIP vào RCX, nạp kernel entry. Kernel kiểm tra tham số (fd hợp lệ, buf trong user range), gọi VFS rồi driver, copy dữ liệu về user buffer, trả về qua `sysret`. Mỗi syscall tốn ~100-1000 ns tuỳ workload. User mode là ring 3, kernel mode là ring 0 (x86-64) hoặc EL0/EL1 (AArch64); trap xảy ra ở cả syscall, page fault, interrupt. Bảo vệ bằng cách CPU từ chối thực thi lệnh ưu tiên ở user mode và kernel kiểm tra tham số trước khi dùng."
+**Nói như trong interview:** System call là cổng để code user yêu cầu kernel làm việc đặc quyền như đọc file hoặc tạo process. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. CPU trap từ user mode sang kernel mode**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

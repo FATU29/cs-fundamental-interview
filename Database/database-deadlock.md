@@ -4,27 +4,36 @@
 
 Chủ đề: Database · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Nơi ứng dụng lưu dữ liệu và đọc lại dữ liệu. Khó ở chỗ dữ liệu phải đúng khi nhiều người cùng đọc, ghi, hoặc khi máy bị lỗi.
+
+**Nói đơn giản:** Database deadlock xảy ra khi hai transaction giữ các khóa khác nhau rồi chờ khóa của nhau. Engine phải chọn một transaction để hủy.
+
+**Từ khóa cần biết:** row = một dòng dữ liệu; query = câu hỏi gửi database; transaction = một nhóm thay đổi được xử lý cùng nhau.
+
+**Ví dụ dễ hình dung:** Transaction thanh toán khóa account trước, transaction hoàn tiền khóa payment trước; thứ tự đảo nhau tạo vòng chờ.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Deadlock trong database là trạng thái hai hoặc nhiều transaction chờ lẫn nhau vì mỗi bên giữ khóa mà bên kia cần để tiếp tục, và không bên nào có thể nhả khóa trước khi hoàn tất. Ví dụ cổ điển: transaction A giữ khóa hàng `orders/1` rồi xin khóa `accounts/5`, cùng lúc transaction B giữ khóa `accounts/5` rồi xin khóa `orders/1`. Không transaction nào tiến được.
+### Đọc nhanh trước khi đi sâu
 
-Hệ quả: engine phải phá vỡ bằng cách chọn một transaction làm nạn nhân (victim) để abort và trả lỗi cho client (MySQL InnoDB trả `ER_LOCK_DEADLOCK` 1213, PostgreSQL trả `40P01 deadlock_detected`); client phải retry. Deadlock khác lock contention thường: contention chỉ chậm, deadlock khiến một transaction chắc chắn thất bại nếu không ai can thiệp.
+**Ý chính:** Database deadlock xảy ra khi hai transaction giữ các khóa khác nhau rồi chờ khóa của nhau. Engine phải chọn một transaction để hủy.
 
-```mermaid
-flowchart TD
-    App["Application<br/>(orders service,<br/>payment worker)"]
-    Driver["DB driver / pool<br/>(begin, txn, rollback, retry)"]
-    Lock["Lock manager<br/>(row, page, table,<br/>intent locks)"]
-    Detect["Deadlock detector<br/>(wait-for graph,<br/>victim selection)"]
-    Log["WAL / undo log<br/>(rollback victim)"]
-    App --> Driver --> Lock --> Detect --> Log
-```
+**Ví dụ interview:** Transaction thanh toán khóa account trước, transaction hoàn tiền khóa payment trước; thứ tự đảo nhau tạo vòng chờ.
 
-*Sơ đồ vị trí: Application mở transaction; lock manager cấp khóa khi SQL chạm dữ liệu; deadlock detector chạy định kỳ so sánh wait-for graph; nạn nhân được rollback nhờ undo log.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Ứng dụng gửi query qua driver hoặc connection pool.
+2. Database engine tìm dữ liệu, kiểm tra constraint và xử lý transaction.
+3. Engine dùng index, lock/MVCC và log tùy loại thao tác.
+4. Kết quả được trả về; thay đổi chỉ bền vững sau COMMIT.
 
-"Deadlock xảy ra khi có chuỗi chờ khóa vòng tròn: T1 giữ khóa R1 chờ R2, T2 giữ R2 chờ R3, T_n giữ R_n chờ R1. Engine phát hiện bằng wait-for graph — InnoDB kiểm tra ngay khi phát sinh wait (mặc định `innodb_deadlock_detect = ON`), PostgreSQL chạy kiểm tra khi `deadlock_timeout` (mặc định 1 giây) bị vượt bằng cách quét `pg_locks`. Khi phát hiện, engine chọn một transaction làm nạn nhân (victim nhỏ nhất theo undo records ở InnoDB) để abort, client phải retry. Phòng tránh bằng cách giữ transaction ngắn, khóa theo thứ tự cố định, dùng index phù hợp để khóa đúng row, hoặc chuyển sang optimistic locking."
+**Nói như trong interview:** Database deadlock xảy ra khi hai transaction giữ các khóa khác nhau rồi chờ khóa của nhau. Engine phải chọn một transaction để hủy. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Khóa được cấp khi SQL chạm dữ liệu, không phải lúc `BEGIN`**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 

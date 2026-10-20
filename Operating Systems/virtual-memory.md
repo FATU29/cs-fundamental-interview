@@ -4,26 +4,36 @@
 
 Chủ đề: Operating Systems · Ngày: 2026-10-16
 
+## 0. Nền tảng trước khi đọc
+
+**Bối cảnh:** Lớp phần mềm quản lý CPU, bộ nhớ, tiến trình và thiết bị. Ứng dụng gọi OS thay vì tự điều khiển phần cứng trực tiếp.
+
+**Nói đơn giản:** Virtual memory cho mỗi process một không gian địa chỉ riêng và chỉ nạp page cần thiết vào RAM, giúp bảo vệ và dùng RAM hiệu quả hơn.
+
+**Từ khóa cần biết:** process = chương trình đang chạy; thread = luồng thực thi; kernel = phần lõi có quyền điều khiển máy.
+
+**Ví dụ dễ hình dung:** Mỗi process thấy địa chỉ ảo riêng; page chưa có trong RAM gây page fault để OS nạp từ disk hoặc cấp frame mới.
+
+Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+
+**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+
 ## 1. Là gì
 
-Virtual memory là kỹ thuật OS tách address space mà process thấy (virtual) ra khỏi address space vật lý (physical). Mỗi process có virtual address space riêng (vd x86-64: 47-bit user, 128 TB); OS map sang physical frame qua page table. Hardware MMU tra page table + TLB để dịch sang physical address khi CPU truy cập.
+### Đọc nhanh trước khi đi sâu
 
-Virtual memory cho phép: (1) mỗi process có memory riêng (isolation), (2) tổng virtual vượt quá physical nhờ swap (overcommit), (3) share page read-only giữa các process (vd shared library, COW), (4) demand load page khi cần (lazy allocation).
+**Ý chính:** Virtual memory cho mỗi process một không gian địa chỉ riêng và chỉ nạp page cần thiết vào RAM, giúp bảo vệ và dùng RAM hiệu quả hơn.
 
-```mermaid
-flowchart LR
-    P["Process A<br/>VA 0x400000"] --> MMU["MMU + TLB"]
-    Q["Process B<br/>VA 0x400000"] --> MMU
-    MMU --> PT["Page Table<br/>(per process)"]
-    PT --> RAM["Physical RAM<br/>(frame 0x1000)"]
-    PT -->|page fault| SWP["Swap<br/>(disk)"]
-```
+**Ví dụ interview:** Mỗi process thấy địa chỉ ảo riêng; page chưa có trong RAM gây page fault để OS nạp từ disk hoặc cấp frame mới.
 
-*Sơ đồ vị trí: process sinh virtual address; MMU tra page table, nếu hit trong RAM thì dịch, nếu page không trong RAM (page fault) OS swap từ disk.*
+**Luồng 4 bước:**
 
-### Trả lời 30 giây
+1. Process dùng virtual address thay vì địa chỉ RAM trực tiếp.
+2. MMU tra TLB hoặc page table để map virtual page sang physical frame.
+3. Nếu page chưa có trong RAM, CPU tạo page fault để kernel xử lý.
+4. Kernel nạp hoặc tạo page, cập nhật mapping rồi cho instruction chạy lại.
 
-"Virtual memory cho phép process dùng address space riêng (x86-64 user 128 TB), OS map sang physical frame qua page table; demand paging load page khi cần, page replacement đẩy page ra swap khi RAM đầy. TLB cache translation ~1-2 cycles; TLB miss buộc page walk ~50-500 ns. Page fault: minor ~100 ns - 1 µs (zero-fill, COW), major ~1-10 ms (đọc từ disk). Thrashing xảy ra khi working set > RAM, OS liên tục swap in/out; cách phòng: tăng RAM, giảm working set, dùng working set model (PFF - Page Fault Frequency)."
+**Nói như trong interview:** Virtual memory cho mỗi process một không gian địa chỉ riêng và chỉ nạp page cần thiết vào RAM, giúp bảo vệ và dùng RAM hiệu quả hơn. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Bước 1. Virtual address space**, rồi nêu trade-off và failure mode ở các phần sau.
 
 ## 2. Cơ chế cốt lõi
 
