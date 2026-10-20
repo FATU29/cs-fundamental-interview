@@ -1,169 +1,301 @@
-# What is the difference between TCP and UDP?
+# TCP và UDP khác nhau thế nào? (Bản dễ hiểu cho người mới)
 
-> TCP cung cấp byte stream tin cậy, có thứ tự, có kiểm soát luồng và tắc nghẽn; UDP chỉ gửi datagram, không đảm bảo đến hay thứ tự. Khác biệt cốt lõi nằm ở chi phí (overhead bắt tay, RTT, state) và đánh đổi (độ trễ vs. độ tin cậy).
+> Đọc trong khoảng 15 phút. Không cần biết trước về mạng máy tính.
 
-Chủ đề: Networking · Ngày: 2026-10-15
+Chủ đề: Networking · Ngày: 2026-10-20
 
 ## 0. Nền tảng trước khi đọc
 
-**Bối cảnh:** Cách trình duyệt, ứng dụng và máy chủ gửi dữ liệu cho nhau. Mỗi bước có giao thức, độ trễ và kiểu lỗi riêng.
+**Bối cảnh:** TCP và UDP nằm ở tầng giao vận. Ứng dụng thường dùng hostname, IP và port; TCP/UDP quyết định cách dữ liệu được chuyển giữa các port đó.
 
-**Nói đơn giản:** TCP đảm bảo byte stream đúng thứ tự; UDP gửi từng datagram với ít cơ chế bảo đảm hơn để đổi lấy độ trễ và quyền kiểm soát.
+**Nói đơn giản:** TCP giống cuộc gọi điện thoại: kết nối trước, nói đủ và đúng thứ tự. UDP giống gửi bưu thiếp: gửi ngay, nhẹ, nhưng có thể thất lạc hoặc tới lộn xộn.
 
-**Từ khóa cần biết:** client = bên gửi request; server = bên phục vụ; packet = mảnh dữ liệu đi qua mạng.
+**Từ khóa cần biết:** `packet` = mảnh dữ liệu đi qua mạng; `port` = số phòng của một chương trình; `RTT` = thời gian đi và quay về; `retransmission` = gửi lại packet bị mất.
 
-**Ví dụ dễ hình dung:** Thanh toán cần TCP để đủ và đúng thứ tự; game state có thể dùng UDP vì frame cũ hết giá trị khi frame mới tới.
+**Cách học bài này:** Đọc phần 1 để có câu trả lời ngắn, phần 2 để hiểu cơ chế bằng ví dụ đời thường, sau đó luyện các câu hỏi interview và phần production ở phía dưới.
 
-Khi đọc, luôn hỏi ba câu: nó giải quyết vấn đề gì, nó làm việc theo những bước nào, và khi nào không nên dùng?
+## 1. Câu trả lời dễ hiểu
 
-**Cách học bài này:** Đọc phần này trước để nắm từ khóa; đọc phần 1 để lấy câu trả lời 30 giây; đọc phần 2 để hiểu cơ chế; cuối cùng mở từng câu hỏi ở phần 3 để luyện nói. Các con số và lệnh trong bài là bằng chứng cho câu trả lời, không cần học thuộc nếu chưa hiểu cơ chế.
+### 🗣️ Trả lời trong một đoạn văn
 
-## 1. Là gì
+TCP và UDP đều là giao thức **tầng giao vận (transport layer)**. Chúng giúp dữ liệu đi từ một chương trình trên máy này tới đúng chương trình trên máy khác thông qua địa chỉ IP và port, nhưng cách đánh đổi giữa độ tin cậy và tốc độ khác nhau. TCP giống như một cuộc gọi điện thoại: hai bên bắt tay trước, dữ liệu được đánh số, bên nhận xác nhận, gói mất được gửi lại, gói sai thứ tự được sắp xếp lại, và tốc độ được giảm khi bên nhận hoặc mạng không chịu kịp. Vì vậy TCP giao dữ liệu **đủ và đúng thứ tự**, phù hợp với web, email, tải file, chat, thanh toán và database. UDP giống như gửi bưu thiếp: không cần mở kết nối, không xác nhận, không gửi lại và không sắp xếp thứ tự. Nó nhẹ và bắt đầu nhanh hơn, nhưng gói có thể mất hoặc tới lộn xộn. UDP phù hợp với gọi video, game online, livestream, DNS và là nền tảng của QUIC/HTTP/3. Câu hỏi quan trọng khi chọn giao thức là: **“Nếu một gói bị mất, mình muốn gửi lại và chờ, hay bỏ qua để nhận dữ liệu mới nhanh hơn?”**
 
+### Tóm tắt trong 30 giây
+
+| | **TCP** | **UDP** |
+|---|---|---|
+| Ví dụ đời thường | Gọi điện thoại | Gửi bưu thiếp |
+| Có bắt tay trước không? | Có, 3 bước | Không, gửi ngay |
+| Mất gói xử lý thế nào? | ACK và gửi lại | Mất là mất, ứng dụng tự quyết định |
+| Có đúng thứ tự không? | Có | Không chắc |
+| Có kiểm soát tốc độ không? | Có flow control và congestion control | Không có sẵn |
+| Dữ liệu nhìn như gì? | Byte stream liên tục | Datagram, từng gói riêng |
+| Dùng cho | Web, email, file, chat, database | Video call, game, livestream, DNS, HTTP/3 |
+
+**Một câu để nhớ:**
+
+- **TCP:** “Chậm một chút cũng được, nhưng phải đủ và đúng.”
+- **UDP:** “Nhanh là ưu tiên; mất một chút cũng có thể chấp nhận.”
+
+### Câu trả lời phỏng vấn ngắn
+
+> “TCP và UDP đều chạy ở transport layer để chuyển dữ liệu giữa các port. TCP là connection-oriented: có three-way handshake, sequence number, ACK, retransmission, flow control và congestion control, nên dữ liệu tới đầy đủ và đúng thứ tự nhưng có thêm latency và head-of-line blocking. UDP là connectionless: header chỉ 8 byte, không handshake, không ACK hay retransmission, nên bắt đầu nhanh và giữ ranh giới từng datagram nhưng có thể mất hoặc lộn thứ tự. Em chọn TCP khi dữ liệu bắt buộc chính xác như HTTP, file, payment; chọn UDP khi latency quan trọng hơn việc nhận đủ như voice/video, game state hoặc DNS. HTTP/3 dùng QUIC trên UDP để tự bổ sung reliability và mã hóa ở tầng trên.”
 
 ## 2. Cơ chế cốt lõi
-### Đọc nhanh trước khi đi sâu
 
-**Ý chính:** TCP đảm bảo byte stream đúng thứ tự; UDP gửi từng datagram với ít cơ chế bảo đảm hơn để đổi lấy độ trễ và quyền kiểm soát.
+### Trước tiên: TCP và UDP dùng để làm gì?
 
-**Ví dụ interview:** Thanh toán cần TCP để đủ và đúng thứ tự; game state có thể dùng UDP vì frame cũ hết giá trị khi frame mới tới.
+Khi gửi dữ liệu qua Internet, dữ liệu ứng dụng thường được chia thành nhiều **packet**. Các packet đi qua nhiều router và Internet không hứa rằng mọi packet sẽ tới hoàn hảo:
 
-**Luồng 4 bước:**
+- Packet có thể bị mất.
+- Packet có thể tới sai thứ tự.
+- Packet có thể bị gửi lại hoặc tới trùng.
+- Packet có thể tới chậm do queue hoặc congestion.
 
-1. Ứng dụng tạo request với tên host, port và dữ liệu.
-2. OS và các giao thức mạng tìm đường rồi chuyển packet tới server.
-3. Server xử lý request và trả response qua kết nối phù hợp.
-4. Client kiểm tra response, cache hoặc render dữ liệu cho người dùng.
+TCP và UDP là hai cách xử lý những vấn đề đó:
 
-**Nói như trong interview:** TCP đảm bảo byte stream đúng thứ tự; UDP gửi từng datagram với ít cơ chế bảo đảm hơn để đổi lấy độ trễ và quyền kiểm soát. Hãy nói theo bốn bước trên trước; nếu interviewer hỏi sâu, chuyển sang cơ chế **Đọc nhanh trước khi đi sâu**, rồi nêu trade-off và failure mode ở các phần sau.
+- **TCP** đứng ra xử lý phần lớn việc đánh số, xác nhận, gửi lại, sắp xếp thứ tự và điều chỉnh tốc độ.
+- **UDP** cung cấp một datagram đơn giản để ứng dụng tự quyết định cần reliability tới đâu.
 
-### 3-way handshake và 4-way close
+```mermaid
+flowchart TB
+    A["Ứng dụng: browser, chat, game..."] --> B{"Dữ liệu có được phép mất không?"}
+    B -->|"Không được mất"| C["TCP"]
+    B -->|"Mất một ít được"| D["UDP"]
+    C --> E["IP: định tuyến packet"]
+    D --> E
+```
 
-TCP thiết lập kết nối qua 3 bước: client gửi SYN với seq ban đầu ngẫu nhiên, server phản hồi SYN+ACK với seq của mình và ack=x+1, client gửi ACK với seq=x+1, ack=y+1. Sau 3 bước cả hai phía đã đồng bộ sequence number và sẵn sàng truyền data. Chi phí: 1 RTT trước khi gửi byte đầu tiên.
+> **Port là gì?** IP giống số nhà; port giống số phòng. Một máy có thể chạy web ở port 443, DNS ở port 53 và game ở một port khác cùng lúc.
+
+### TCP — giống một cuộc gọi điện thoại
+
+#### Bắt tay 3 bước
+
+TCP không gửi dữ liệu ứng dụng ngay. Hai bên mở kết nối trước để xác nhận đường đi hai chiều và đồng bộ sequence number.
+
+```mermaid
+sequenceDiagram
+    participant C as Máy bạn (Client)
+    participant S as Máy chủ (Server)
+    C->>S: SYN — “Alo, nghe không?”
+    S->>C: SYN-ACK — “Nghe rồi, bạn nghe tôi không?”
+    C->>S: ACK — “Nghe rõ, bắt đầu nhé”
+    Note over C,S: ESTABLISHED: bắt đầu gửi dữ liệu
+```
+
+Ba bước này thường tốn **1 RTT (round-trip time)** trước khi byte ứng dụng đầu tiên được gửi. Đó là lý do TCP khởi động chậm hơn một datagram UDP.
+
+#### Mất packet thì TCP gửi lại
+
+Mỗi byte trong TCP stream có sequence number. Bên nhận gửi ACK để báo đã nhận tới đâu. Nếu một segment mất, TCP retransmit sau RTO hoặc sau fast retransmit.
+
+```mermaid
+sequenceDiagram
+    participant G as Người gửi
+    participant N as Người nhận
+    G->>N: Segment 1
+    G->>N: Segment 2
+    G--xN: Segment 3 bị mất
+    G->>N: Segment 4
+    N->>G: Duplicate ACK — “Tôi vẫn chờ segment 3”
+    G->>N: Retransmit segment 3
+    Note over N: Ghép stream theo thứ tự 1 → 2 → 3 → 4
+```
+
+#### TCP giữ đúng thứ tự
+
+Nếu segment 4 tới trước segment 3, TCP giữ segment 4 trong buffer. Ứng dụng chỉ được đọc dữ liệu theo thứ tự sau khi segment 3 tới. Cơ chế này giúp file và HTTP response không bị tráo byte, nhưng cũng tạo ra **head-of-line blocking**: một segment mất có thể làm dữ liệu phía sau phải chờ.
+
+#### TCP không gửi quá sức
+
+| Cơ chế | Nói dễ hiểu |
+|---|---|
+| **Flow control** | Bên nhận báo “buffer của tôi gần đầy, gửi chậm lại”. TCP giới hạn theo receive window (`rwnd`). |
+| **Congestion control** | TCP đo loss/RTT để đoán mạng đang tắc, rồi điều chỉnh congestion window (`cwnd`). |
+| **Sequence + ACK** | Hai bên biết byte nào đã tới và byte nào cần gửi lại. |
+
+#### Đóng kết nối
+
+TCP đóng từng chiều độc lập. Bên muốn ngừng gửi gửi `FIN`; bên kia trả `ACK`, có thể tiếp tục gửi phần còn lại, rồi gửi `FIN` của mình. Bên đóng trước thường giữ trạng thái **TIME_WAIT** trong một khoảng thời gian để packet cũ không nhầm với connection mới cùng 4-tuple.
 
 ```mermaid
 sequenceDiagram
     participant C as Client
     participant S as Server
-    C->>S: SYN (seq=x, cwnd=10 MSS)
-    Note over S: SYN_RCVD
-    S-->>C: SYN,ACK (seq=y, ack=x+1)
-    Note over C: Client sẵn sàng
-    C->>S: ACK (seq=x+1, ack=y+1)
-    Note over C,S: ESTABLISHED
-    C->>S: FIN (active close)
+    C->>S: FIN
     S-->>C: ACK
-    S-->>C: FIN (passive close)
-    C->>S: ACK
-    Note over C: TIME_WAIT 60s
-    Note over S: CLOSED
+    S->>C: FIN
+    C-->>S: ACK
+    Note over C: TIME_WAIT rồi mới đóng hẳn
 ```
 
-*Sơ đồ 3-way handshake và 4-way close: SYN đồng bộ seq, FIN đóng từng chiều độc lập, phía active close vào TIME_WAIT 60s.*
+### UDP — giống gửi bưu thiếp
 
-Đóng kết nối độc lập từng chiều: phía muốn stop gửi gửi FIN, phía kia ACK rồi tiếp tục gửi data nếu cần, cuối cùng gửi FIN riêng. Tổng cộng 4 bước. Phía active close vào TIME_WAIT 60s (Linux) để gói cuối cùng không nhầm với connection mới cùng 4-tuple.
-
-### Header và MTU
+UDP không cần mở connection. Mỗi lần gửi tạo một datagram độc lập.
 
 ```mermaid
-flowchart LR
-    subgraph TCPseg["TCP Segment (20-60B)"]
-        SP["Src Port 16b"] --> DP["Dst Port 16b"]
-        DP --> SEQ["Seq 32b"]
-        SEQ --> ACK["Ack 32b"]
-        ACK --> OFF["Data<br/>Offset 4b"] --> FL["Flags<br/>8b"] --> WIN["Window 16b"]
-        WIN --> CS["Checksum 16b"] --> UR["Urgent 16b"] --> OPT["Options 0-40B"]
-    end
-    subgraph UDPdg["UDP Datagram (8B)"]
-        USP["Src Port 16b"] --> UDP["Dst Port 16b"]
-        UDP --> UL["Length 16b"] --> UCS["Checksum 16b"]
-    end
-    style TCPseg fill:#b3e0ff
-    style UDPdg fill:#ffe0b3
+sequenceDiagram
+    participant G as Người gửi
+    participant N as Người nhận
+    G->>N: Datagram 1
+    G--xN: Datagram 2 bị mất
+    G->>N: Datagram 3
+    Note over G,N: Không handshake, không ACK, không retransmit
 ```
 
-*So sánh header: TCP 20-60 byte (port, seq, ack, flags, window, options) vs. UDP 8 byte cố định (port, length, checksum).*
+UDP có các đặc điểm chính:
 
-TCP header bắt buộc 20 byte + options tối đa 40 byte. UDP header cố định 8 byte. Với payload nhỏ (DNS query ~50 byte), header TCP chiếm ~40% overhead so với 16% của UDP. Với payload lớn (file transfer vài KB), header overhead không đáng kể.
+- Không handshake nên có thể gửi ngay, gần như 0 RTT ở transport.
+- Không ACK và không retransmission; mất packet thì kernel UDP không tự báo cho ứng dụng.
+- Không sắp xếp thứ tự và không chống duplicate ở transport.
+- Mỗi `sendto()` tạo một datagram; người nhận đọc từng datagram, không phải byte stream liên tục.
+- Header UDP cố định **8 byte**, nhỏ hơn TCP 20–60 byte.
+- Có thể dùng multicast/broadcast trong những mạng cho phép.
+- UDP không tự flow control hoặc congestion control; ứng dụng gửi quá nhanh có thể làm queue đầy và bị drop.
 
-TCP tự cắt segment theo MSS (Maximum Segment Size = MTU − 40, thường 1460 byte trên Ethernet). UDP ứng dụng phải tự cắt datagram ≤ MTU − 28, nếu không IP fragment có thể mất và mất cả datagram.
+UDP không có nghĩa là “không có checksum”. UDP vẫn có checksum để phát hiện dữ liệu lỗi; checksum không đồng nghĩa với việc packet chắc chắn tới nơi hay được gửi lại.
 
-### Retransmission và congestion control
+### Vì sao dùng UDP khi nó không đáng tin?
 
-TCP phát lại segment khi không nhận ACK trong RTO (Retransmission Timeout). RTO tính từ RTT mẫu theo công thức Jacobson/Karels (RFC 6298): RTO = SRTT + 4 × RTTVAR. Linux RTO tối thiểu 200ms. Fast retransmit kích hoạt khi nhận 3 ACK trùng: phát lại ngay không đợi RTO.
+Vì đôi khi **dữ liệu cũ còn tệ hơn dữ liệu bị mất**.
 
-Congestion window (cwnd) giới hạn số byte outstanding. Slow start khởi đầu 10 MSS (RFC 6928), tăng gấp đôi mỗi RTT. Khi đạt ssthresh, chuyển sang congestion avoidance tăng tuyến tính. Khi mất gói, cwnd giảm: RTO → về 1 MSS; fast retransmit → cwnd/2. CUBIC (mặc định Linux) dùng hàm cubic thay Reno. BBR dựa trên delivery rate, không coi mất gói là tắc nghẽn.
+#### Game online
 
-UDP không có connection, không có flow control. Khi buffer nhận đầy, kernel drop datagram im lặng và ứng dụng không biết (trừ khi bật `IP_RECVERR` hoặc `SO_ERROR`). Ứng dụng UDP cần tự bounded datagram size (≤ 1200 byte qua VPN an toàn), tự code sequence number và retry nếu cần reliability.
+Giả sử server gửi vị trí nhân vật 30 lần mỗi giây. Nếu frame N+1 bị mất:
 
-### Quan sát
+- Với TCP, stream có thể phải chờ frame N+1 được retransmit trước khi giao frame N+2 cho ứng dụng.
+- Với UDP, client bỏ qua N+1 và nhận N+2 sau khoảng 33 ms; client dùng interpolation hoặc prediction để lấp khoảng trống.
 
-```bash
-# Xem cwnd, rtt, retransmission cho mọi TCP connection
-ss -tinp
-# Cột cuối hiển thị: cwnd:46 rtt:12.5/3.2 rttvar:5.1 ssthresh:46 retrans:0/1
-# Đọc: cwnd × MSS / rtt = throughput lý thuyết. Nếu cwnd:10, rtt:50ms → ~2.3 Mbps.
+#### Gọi video
 
-# UDP counter và drop
-netstat -su | grep -i -E 'udp|error|drop'
-# InErrors tăng = checksum sai hoặc buffer full.
+Mất một frame có thể làm hình hơi nhòe. Chờ retransmit frame cũ có thể làm tiếng và hình trễ rõ rệt, nên video thường ưu tiên frame mới.
 
-# Bắt gói TCP handshake
-tcpdump -i any 'tcp[tcpflags] & tcp-syn != 0' -c 5
-# 5 SYN đầu tiên trên mọi interface, verify 3-Way handshake bằng mắt.
+> Một packet mất làm dữ liệu phía sau phải chờ trong TCP được gọi là **head-of-line blocking**. UDP datagram độc lập nên không có HOL blocking ở transport của nó.
 
-# Đo throughput với iperf3
-iperf3 -c <server-ip>            # TCP, 10s mặc định
-iperf3 -c <server-ip> -u -b 100M # UDP, 100 Mbps, xem lost/total
+### Khi nào dùng TCP, khi nào dùng UDP?
+
+```mermaid
+flowchart TD
+    Q1{"Dữ liệu có được phép mất hoặc sai thứ tự không?"}
+    Q1 -->|"Không được mất"| TCP["TCP"]
+    Q1 -->|"Mất một ít được"| Q2{"Có cần độ trễ rất thấp không?"}
+    Q2 -->|Có| UDP["UDP"]
+    Q2 -->|Không| TCP
 ```
 
-### Ví dụ chạy từng bước
-
-Kịch bản: game server gửi world state tới client mỗi 100 ms. Frame N gửi tại t=0, frame N+1 tại t=100 ms. Packet thứ 2 (frame N+1) bị mất. So sánh TCP vs UDP để thấy khác biệt trong xử lý mất gói.
-
-Giả định: RTT = 50 ms. Game state mỗi frame ~60 byte, payload nhỏ nên không bị fragment.
-
-**Luồng UDP:**
-
-| Bước | Thời gian | Ai | Hành động | Trạng thái |
-|---|---|---|---|---|
-| 1 | t=0 | Server | Gửi frame N (60B) | In-flight |
-| 2 | t=50 | Client | Nhận frame N ✓ | Client render frame N |
-| 3 | t=100 | Server | Gửi frame N+1 (60B) | In-flight |
-| 4 | t=150 | — | Frame N+1 bị mất trên đường truyền | Router drop |
-| 5 | t=200 | Server | Gửi frame N+2 (60B) | In-flight |
-| 6 | t=250 | Client | Nhận frame N+2. Client interpolation lấp khoảng trống từ frame N. Không chờ retransmit. | Client render frame N+2. Độ trễ thị giác ~50 ms |
-
-Với UDP, mất một frame không block frame tiếp theo. Client interpolation giữa frame N và N+2 che khoảng trống. Độ trễ thêm ~1 frame (100 ms). Không có RTO chờ.
-
-**Luồng TCP:**
-
-| Bước | Thời gian | Ai | Hành động | Trạng thái |
-|---|---|---|---|---|
-| 1 | t=0 | Server | Gửi frame N (60B) | In-flight |
-| 2 | t=50 | Client | ACK frame N ✓ | Client render frame N |
-| 3 | t=100 | Server | Gửi frame N+1 (60B) | In-flight |
-| 4 | t=150 | — | Frame N+1 bị mất | Router drop |
-| 5 | t=150 | Client | Nhận 3 duplicate ACK cho seq frame N | Kernel trigger fast retransmit |
-| 6 | t=200 | Server | Retransmit frame N+1. Nhận ACK cumulative. Client render frame N+1 rồi tiếp tục N+2. | Độ trễ thêm ~50-200 ms so với UDP |
-
-Với TCP, mất frame N+1 block mọi frame sau trong cùng stream (HOL blocking). Client không render frame N+2 cho đến khi frame N+1 đến. Độ trễ: RTO ~200 ms (Linux minimum) hoặc fast retransmit tại t~150 ms. Thêm ~50-200 ms so với UDP.
-
-**So sánh tổng:**
-
-| Tiêu chí | UDP | TCP |
+| Ứng dụng | Giao thức thường dùng | Lý do |
 |---|---|---|
-| Frame bị mất | Frame N+1 | Frame N+1 |
-| Frame sau block? | Không | Có (HOL blocking) |
-| Thời gian chờ thêm | 0 (interpolation che) | 50-200 ms (retransmit + reorder) |
-| Retransmit data? | Không | Có, cho đến khi ACK cumulative |
-| Phù hợp cho | Game state 60 Hz, VoIP | Payment, file transfer, HTTP |
+| HTTP/1.1, HTTP/2 | TCP | Response phải đầy đủ và đúng thứ tự. |
+| Email, tải file | TCP | Thiếu byte có thể làm file hỏng. |
+| Payment, đặt vé | TCP | Cần transport ổn định; tầng ứng dụng vẫn phải idempotent và xác nhận giao dịch. |
+| Chat | TCP | Tin nhắn không nên mất hoặc tráo thứ tự. |
+| MySQL, PostgreSQL, Redis | TCP | Lệnh và response cần stream tin cậy. |
+| Video call, voice | UDP | Ưu tiên latency; frame cũ có thể bỏ qua. |
+| Game state | UDP | Vị trí mới quan trọng hơn vị trí cũ. |
+| DNS thông thường | UDP, có thể fallback TCP/DoT/DoH | Query nhỏ; cần nhanh; response lớn có thể dùng transport khác. |
+| YouTube/Netflix | TCP hoặc QUIC/HTTP/3 | Có buffer; HTTP/3 dùng QUIC trên UDP khi hỗ trợ. |
+| HTTP/3 | UDP qua QUIC | QUIC tự thêm reliability, congestion control và TLS. |
 
-Nếu mất gói nhiều hơn (10% loss rate): UDP vẫn chơi được (client interpolation che). TCP cwnd sẽ giảm (cubic/BBR phản ứng), throughput tụt đáng kể. Game state 60 Hz trên TCP với 10% loss sẽ stutter rõ rệt.
+Không nên chọn chỉ dựa trên nhãn “TCP chậm, UDP nhanh”. Hãy hỏi: dữ liệu có cần đúng đủ không, latency cho phép bao nhiêu, mạng có chặn UDP không, và đội ngũ có muốn tự vận hành reliability ở tầng ứng dụng không?
 
-Nếu game cần reliability cho một event (player die, item pickup): dùng reliable channel trên UDP (application-level ACK + retry với timeout riêng). Ví dụ: gửi `{"type":"death","ts":12345}` với application-level ACK, retry sau 500 ms. Các frame state vẫn unreliable.
+### QUIC — UDP được xây thêm tính năng
 
-Điều rút ra: UDP gửi frame mới ngay dù frame trước mất; TCP chờ retransmit cumulative, gây stall. Kịch bản này minh chứng câu hỏi "When would you use UDP instead of TCP?" trong phần 3A.
+HTTP/3 chạy trên **QUIC**, còn QUIC chạy trên UDP. QUIC không bỏ reliability; nó tự triển khai sequence, ACK, retransmission, congestion control và TLS 1.3 ở tầng trên UDP.
+
+QUIC có ba lợi ích dễ nhớ:
+
+1. **Handshake gọn hơn:** transport handshake và TLS được phối hợp, thường 1-RTT; resume có thể 0-RTT.
+2. **Stream độc lập:** mất packet của một stream không nhất thiết chặn mọi stream khác như TCP byte stream.
+3. **Connection migration:** QUIC có Connection ID, nên có thể tiếp tục khi client đổi Wi-Fi sang 4G mà không phải tạo connection TCP mới.
+
+UDP vẫn chỉ là nền móng. Nếu dùng UDP trực tiếp, ứng dụng phải tự thiết kế sequence, ACK, timeout, retry, giới hạn tốc độ, chống abuse và xử lý packet lớn. QUIC làm sẵn phần lớn việc đó.
+
+### Ví dụ code Python ngắn
+
+#### TCP: phải connect trước
+
+```python
+import socket
+
+# Server
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.bind(("127.0.0.1", 9000))
+server.listen(1)
+conn, addr = server.accept()       # chờ TCP handshake và accept connection
+with conn:
+    data = conn.recv(1024)
+    conn.sendall(b"Da nhan: " + data)
+
+# Client: chạy ở process khác sau khi server đã listen
+client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+client.connect(("127.0.0.1", 9000)) # kernel thực hiện SYN/SYN-ACK/ACK
+client.sendall(b"Xin chao")
+print(client.recv(1024))
+client.close()
+```
+
+TCP là **byte stream**. Nếu client gọi `sendall(b"HELLO")` rồi `sendall(b"WORLD")`, server có thể đọc một lần thành `HELLOWORLD`, hoặc đọc thành nhiều đoạn như `HEL` rồi `LOWORLD`. Muốn giữ ranh giới message, ứng dụng phải tự framing, chẳng hạn gửi độ dài ở đầu message hoặc kết thúc bằng `\n`.
+
+#### UDP: gửi datagram trực tiếp
+
+```python
+import socket
+
+# Server
+server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+server.bind(("127.0.0.1", 9001))
+data, addr = server.recvfrom(1024)  # không có accept()
+server.sendto(b"Da nhan: " + data, addr)
+
+# Client: chạy ở process khác
+client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+client.settimeout(2)                # ứng dụng tự đặt timeout
+client.sendto(b"Xin chao", ("127.0.0.1", 9001))
+print(client.recvfrom(1024))
+client.close()
+```
+
+UDP giữ ranh giới datagram: một `sendto()` tương ứng với một datagram ở phía nhận, miễn packet không bị mất hoặc bị từ chối vì quá lớn.
+
+### Hiểu lầm thường gặp
+
+| Hiểu lầm | Sự thật |
+|---|---|
+| “UDP luôn nhanh hơn TCP.” | Cả hai đi trên cùng mạng. UDP bỏ handshake/retransmission nên latency bắt đầu thấp hơn; tốc độ tải file còn phụ thuộc loss, congestion và ứng dụng. |
+| “UDP không đáng tin nên không ai dùng.” | DNS, video call, game và HTTP/3 đều dùng UDP hoặc giao thức xây trên UDP. |
+| “TCP đảm bảo mọi thứ 100% thành công.” | TCP đảm bảo byte stream tới kernel máy kia. Ứng dụng có thể crash hoặc chưa commit giao dịch; payment vẫn cần ACK/idempotency ở tầng ứng dụng. |
+| “TCP giữ ranh giới message.” | TCP chỉ là byte stream. Ứng dụng phải tự framing. |
+| “UDP không có checksum.” | UDP có checksum để phát hiện lỗi; checksum không sửa packet và không retransmit. |
+| “TCP và UDP không thể dùng cùng port.” | Có thể. DNS dùng cả 53/UDP và 53/TCP; protocol là một phần của socket identity. |
+| “Dùng UDP là tự có multicast.” | Multicast/broadcast còn phụ thuộc network, router và policy; Internet công cộng thường không forward tùy ý. |
+
+### Bảng so sánh cuối cùng
+
+| Tiêu chí | TCP | UDP |
+|---|---|---|
+| Connection setup | Có, SYN → SYN-ACK → ACK | Không có handshake transport |
+| Reliability | ACK, retransmission, SACK | Ứng dụng tự xây nếu cần |
+| Đúng thứ tự | Có | Không đảm bảo |
+| Chống duplicate | Có ở transport | Ứng dụng tự xử lý |
+| Flow control | Có | Không có sẵn |
+| Congestion control | Có, ví dụ CUBIC/BBR | Không có sẵn |
+| Head-of-line blocking | Có trong byte stream | Không ở transport datagram |
+| Ranh giới message | Không giữ | Giữ từng datagram |
+| Header | 20–60 byte | 8 byte |
+| Độ trễ bắt đầu | Thường cao hơn | Thường thấp hơn |
+| Độ phức tạp ứng dụng | Ít phải tự xây reliability | Phải tự xử lý loss/order/rate nếu cần |
+| Ví dụ | Web, email, file, SSH, database | DNS, game, voice/video, QUIC/HTTP/3 |
+
+### 🎯 Ghi nhớ trước khi phỏng vấn
+
+1. **TCP = gọi điện thoại:** kết nối trước, nói đủ, nói đúng thứ tự; không nghe rõ thì nói lại.
+2. **UDP = gửi bưu thiếp:** gửi ngay, nhẹ, nhưng có thể thất lạc hoặc tới lộn xộn.
+3. Đừng chỉ hỏi “cái nào nhanh hơn?”. Hãy hỏi: **“Nếu packet mất, dữ liệu mới có thay thế được dữ liệu cũ không?”**
+   - Không được mất → TCP hoặc một giao thức reliable như QUIC.
+   - Gói cũ không còn giá trị → UDP hoặc protocol realtime trên UDP.
+
+---
 
 ## 3. Câu hỏi phỏng vấn
 
